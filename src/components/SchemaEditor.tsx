@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { confirm } from "@tauri-apps/plugin-dialog";
-import { api, FieldDef, FieldType, Schema } from "../api";
+import { api, FieldDef, FieldType, Schema, SourceInfo } from "../api";
 
 interface Props {
   mode: "create" | "edit";
@@ -94,6 +94,13 @@ export default function SchemaEditor({
   const [coteGenre, setCoteGenre] = useState(schema?.cote?.genre_field ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [catalog, setCatalog] = useState<SourceInfo[]>([]);
+
+  useEffect(() => {
+    api.hydrationSources().then(setCatalog).catch(() => setCatalog([]));
+  }, []);
+
+  const selectedSource = catalog.find((s) => s.id === source);
 
   const set = (i: number, patch: Partial<EditableField>) =>
     setFields((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f)));
@@ -230,11 +237,27 @@ export default function SchemaEditor({
         )}
 
         <label>Hydratation</label>
-        <select value={source} onChange={(e) => setSource(e.target.value)}>
-          <option value="">Aucune (saisie manuelle)</option>
-          <option value="bd">Bases livres/BD (BNF, Google Books…)</option>
-          <option value="livres">Bases livres (BNF, Google Books…)</option>
-        </select>
+        <div>
+          <select value={source} onChange={(e) => setSource(e.target.value)}>
+            <option value="">Aucune (saisie manuelle)</option>
+            {catalog.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+                {s.requires_key ? " · 🔑 clé requise" : ""}
+              </option>
+            ))}
+          </select>
+          {selectedSource && (
+            <p className="muted source-hint">
+              {selectedSource.description}
+              <br />
+              Champs remplis automatiquement (nommez vos champs ainsi) :{" "}
+              <code>{selectedSource.fills.join(", ")}</code>
+              {selectedSource.requires_key &&
+                " — clé à saisir dans « 🔑 Clés API »."}
+            </p>
+          )}
+        </div>
       </div>
 
       <h3 className="fields-title">Champs</h3>

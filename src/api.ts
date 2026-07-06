@@ -150,6 +150,14 @@ export interface EnrichProgress {
   current: string;
 }
 
+export interface SourceInfo {
+  id: string;
+  label: string;
+  description: string;
+  requires_key: string | null;
+  fills: string[];
+}
+
 export interface CsvPreview {
   headers: string[];
   rows: string[][];
@@ -246,6 +254,7 @@ export const api = {
   setApiKey: (provider: "tmdb" | "discogs", key: string) =>
     invoke<void>("set_api_key", { provider, key }),
   apiKeysStatus: () => invoke<{ tmdb: boolean; discogs: boolean }>("api_keys_status"),
+  hydrationSources: () => invoke<SourceInfo[]>("hydration_sources"),
 
   isMobile: () => invoke<boolean>("is_mobile"),
   getMobileConfig: () =>

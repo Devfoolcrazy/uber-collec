@@ -162,6 +162,16 @@ select:focus {
   white-space: nowrap;
 }
 
+.source-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.source-hint code {
+  font-size: 11px;
+}
+
 .key-hint {
   font-size: 11px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;

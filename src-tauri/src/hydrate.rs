@@ -38,6 +38,52 @@ pub struct Candidate {
     pub acteurs: Vec<String>,
 }
 
+/// Catalogue des sources d'hydratation disponibles, présenté dans l'éditeur
+/// de schéma. Les collections custom choisissent librement dedans.
+#[derive(Debug, Serialize)]
+pub struct SourceInfo {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub description: &'static str,
+    /// Clé API à configurer (🔑), le cas échéant.
+    pub requires_key: Option<&'static str>,
+    /// Champs de schéma que la source sait remplir (clés).
+    pub fills: &'static [&'static str],
+}
+
+pub fn sources_catalog() -> Vec<SourceInfo> {
+    vec![
+        SourceInfo {
+            id: "livres",
+            label: "Livres — BNF, Google Books, OpenLibrary",
+            description: "Recherche par ISBN (douchette) ou titre. Idéal pour tout ce qui a un ISBN : romans, guides, livres-jeux…",
+            requires_key: None,
+            fills: &["titre", "auteur", "editeur", "date_parution", "synopsis", "isbn", "ean"],
+        },
+        SourceInfo {
+            id: "bd",
+            label: "BD & mangas — BNF, Google Books, OpenLibrary",
+            description: "Comme Livres, avec scénariste et dessinateur distingués (BNF).",
+            requires_key: None,
+            fills: &["titre", "scenariste", "dessinateur", "editeur", "date_parution", "synopsis", "ean"],
+        },
+        SourceInfo {
+            id: "cd",
+            label: "Musique — MusicBrainz, Discogs",
+            description: "Recherche par code-barres ou artiste + album. Genres et pochettes via Discogs.",
+            requires_key: Some("discogs"),
+            fills: &["titre", "artiste", "label", "editeur", "genre", "date_sortie", "ean"],
+        },
+        SourceInfo {
+            id: "dvd",
+            label: "Films — TMDB",
+            description: "Recherche par titre uniquement (pas de code-barres). Affiches, synopsis, réalisateur, acteurs, genre.",
+            requires_key: Some("tmdb"),
+            fills: &["titre", "realisateur", "acteurs", "genre", "date_sortie", "synopsis"],
+        },
+    ]
+}
+
 pub(crate) fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent("UberCollec/0.1 (gestionnaire de collection personnel)")

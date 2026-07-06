@@ -526,6 +526,11 @@ async fn hydrate_search(
 }
 
 #[tauri::command]
+fn hydration_sources() -> Vec<hydrate::SourceInfo> {
+    hydrate::sources_catalog()
+}
+
+#[tauri::command]
 fn set_api_key(app: AppHandle, provider: String, key: String) -> Result<(), String> {
     let mut config = load_config(&app)?;
     let value = Some(key.trim().to_string()).filter(|k| !k.is_empty());
@@ -750,6 +755,7 @@ pub fn run() {
             download_cover,
             set_api_key,
             api_keys_status,
+            hydration_sources,
             enrich_start,
             enrich_status,
             enrich_cancel,
