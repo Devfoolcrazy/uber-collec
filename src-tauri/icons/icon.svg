@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#1e40af"/>
+    </linearGradient>
+    <clipPath id="tile">
+      <rect x="100" y="100" width="824" height="824" rx="185"/>
+    </clipPath>
+  </defs>
+
+  <!-- Tuile -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+
+  <g clip-path="url(#tile)">
+    <!-- Étagère -->
+    <rect x="140" y="740" width="744" height="30" rx="15" fill="#1e3a8a"/>
+
+    <!-- Livre 1 : blanc, avec code-barres -->
+    <rect x="215" y="368" width="108" height="372" rx="14" fill="#f8fafc"/>
+    <rect x="215" y="418" width="108" height="26" fill="#cbd5e1"/>
+    <g fill="#334155">
+      <rect x="243" y="648" width="7" height="52"/>
+      <rect x="256" y="648" width="13" height="52"/>
+      <rect x="275" y="648" width="7" height="52"/>
+      <rect x="288" y="648" width="10" height="52"/>
+    </g>
+
+    <!-- Livre 2 : ambre, le plus haut -->
+    <rect x="337" y="308" width="100" height="432" rx="14" fill="#fbbf24"/>
+    <rect x="337" y="358" width="100" height="24" fill="#b45309" opacity="0.55"/>
+    <rect x="337" y="672" width="100" height="24" fill="#b45309" opacity="0.55"/>
+
+    <!-- Livre 3 : corail -->
+    <rect x="451" y="396" width="118" height="344" rx="14" fill="#fb7185"/>
+    <circle cx="510" cy="470" r="26" fill="#ffe4e6"/>
+
+    <!-- Livre 4 : émeraude, penché -->
+    <g transform="rotate(13 700 740)">
+      <rect x="600" y="332" width="100" height="408" rx="14" fill="#34d399"/>
+      <rect x="600" y="382" width="100" height="24" fill="#065f46" opacity="0.5"/>
+    </g>
+
+    <!-- Livre 5 : gris clair -->
+    <rect x="716" y="380" width="102" height="360" rx="14" fill="#e2e8f0"/>
+    <rect x="716" y="640" width="102" height="26" fill="#94a3b8"/>
+  </g>
+</svg>
