@@ -112,11 +112,15 @@ export interface Candidate {
   source: string;
   titre: string | null;
   auteurs: string[];
+  illustrateurs: string[];
+  acteurs: string[];
   editeur: string | null;
   date_parution: string | null;
   ean: string | null;
+  genre: string | null;
   synopsis: string | null;
   cover_url: string | null;
+  score: number | null;
 }
 
 /** URL affichable d'une couverture stockée dans la bibliothèque. */
