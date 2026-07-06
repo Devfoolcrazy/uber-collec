@@ -82,6 +82,7 @@ export default function HydrateSearch({
 }: Props) {
   const [query, setQuery] = useState(initialQuery ?? "");
   const [results, setResults] = useState<Candidate[] | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tmdbKey, setTmdbKey] = useState("");
@@ -106,10 +107,13 @@ export default function HydrateSearch({
     setLoading(true);
     setError(null);
     try {
-      setResults(await api.hydrateSearch(collection, q));
+      const outcome = await api.hydrateSearch(collection, q);
+      setResults(outcome.candidates);
+      setWarnings(outcome.warnings);
     } catch (e) {
       setError(String(e));
       setResults(null);
+      setWarnings([]);
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -173,8 +177,14 @@ export default function HydrateSearch({
         error && <p className="error">{error}</p>
       )}
 
+      {warnings.length > 0 && (
+        <p className="source-warning">
+          ⚠ Source momentanément indisponible : {warnings.join(" · ")}
+        </p>
+      )}
+
       {results !== null && results.length === 0 && (
-        <p className="empty">Aucun résultat dans les bases interrogées.</p>
+        <p className="empty">Aucun résultat dans les bases qui ont répondu.</p>
       )}
 
       {results && results.length > 0 && (

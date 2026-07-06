@@ -120,12 +120,39 @@ pub fn looks_like_barcode(query: &str) -> bool {
     (q.len() == 10 || q.len() == 13) && q.chars().all(|c| c.is_ascii_digit())
 }
 
+/// Résultat d'une recherche multi-sources : les candidats trouvés, plus les
+/// sources indisponibles signalées séparément — « introuvable » et « en
+/// panne » ne doivent jamais se confondre.
+#[derive(Debug, Serialize)]
+pub struct SearchOutcome {
+    pub candidates: Vec<Candidate>,
+    pub warnings: Vec<String>,
+}
+
+/// Agrège des résultats de sources parallèles : erreur uniquement si TOUTES
+/// ont échoué ; sinon candidats + avertissements.
+fn combine(results: Vec<Result<Vec<Candidate>, String>>) -> Result<SearchOutcome, String> {
+    let total = results.len();
+    let mut candidates = Vec::new();
+    let mut warnings = Vec::new();
+    for result in results {
+        match result {
+            Ok(mut list) => candidates.append(&mut list),
+            Err(e) => warnings.push(e),
+        }
+    }
+    if warnings.len() == total {
+        return Err(warnings.join(" · "));
+    }
+    Ok(SearchOutcome { candidates, warnings })
+}
+
 pub async fn search(
     source: &str,
     query: &str,
     tmdb_key: Option<&str>,
     discogs_token: Option<&str>,
-) -> Result<Vec<Candidate>, String> {
+) -> Result<SearchOutcome, String> {
     match source {
         "bd" | "livres" => search_books(query).await,
         "cd" => {
@@ -139,20 +166,9 @@ pub async fn search(
                         musicbrainz(&client, query, barcode),
                         discogs(&client, token, query, barcode)
                     );
-                    let mut out = Vec::new();
-                    let mut errors = Vec::new();
-                    for result in [mb, dg] {
-                        match result {
-                            Ok(mut list) => out.append(&mut list),
-                            Err(e) => errors.push(e),
-                        }
-                    }
-                    if out.is_empty() && !errors.is_empty() {
-                        return Err(errors.join(" · "));
-                    }
-                    Ok(out)
+                    combine(vec![mb, dg])
                 }
-                None => musicbrainz(&client, query, barcode).await,
+                None => combine(vec![musicbrainz(&client, query, barcode).await]),
             }
         }
         "dvd" => {
@@ -165,7 +181,7 @@ pub async fn search(
                 );
             }
             let client = client()?;
-            tmdb(&client, key, query).await
+            combine(vec![tmdb(&client, key, query).await])
         }
         other => Err(format!(
             "hydratation pas encore disponible pour « {other} » (adaptateur à venir)"
@@ -173,7 +189,7 @@ pub async fn search(
     }
 }
 
-async fn search_books(query: &str) -> Result<Vec<Candidate>, String> {
+async fn search_books(query: &str) -> Result<SearchOutcome, String> {
     let client = client()?;
     let barcode = looks_like_barcode(query);
     let (bnf, gb, ol) = tokio::join!(
@@ -181,19 +197,8 @@ async fn search_books(query: &str) -> Result<Vec<Candidate>, String> {
         google_books(&client, query, barcode),
         openlibrary(&client, query, barcode)
     );
-    let mut candidates = Vec::new();
-    let mut errors = Vec::new();
     // BNF d'abord : la référence pour le fonds français (BD, mangas).
-    for result in [bnf, gb, ol] {
-        match result {
-            Ok(mut list) => candidates.append(&mut list),
-            Err(e) => errors.push(e),
-        }
-    }
-    if candidates.is_empty() && !errors.is_empty() {
-        return Err(errors.join(" · "));
-    }
-    Ok(candidates)
+    combine(vec![bnf, gb, ol])
 }
 
 fn s(v: &serde_json::Value) -> Option<String> {
@@ -1168,14 +1173,14 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn hydrate_live() {
-        let by_ean = search("bd", "9782344044438", None, None).await.unwrap();
+        let by_ean = search("bd", "9782344044438", None, None).await.unwrap().candidates;
         println!("EAN → {} candidats", by_ean.len());
         for c in &by_ean {
             println!("  [{}] {:?} — {:?} ({:?}) cover: {}", c.source, c.titre, c.auteurs, c.date_parution, c.cover_url.is_some());
         }
         assert!(!by_ean.is_empty());
 
-        let by_title = search("bd", "Lastman Balak", None, None).await.unwrap();
+        let by_title = search("bd", "Lastman Balak", None, None).await.unwrap().candidates;
         println!("titre → {} candidats", by_title.len());
         assert!(!by_title.is_empty());
 

@@ -250,7 +250,10 @@ export const api = {
   ) => invoke<ImportReport>("import_csv", { collection, path, mappings, options }),
 
   hydrateSearch: (collection: string, query: string) =>
-    invoke<Candidate[]>("hydrate_search", { collection, query }),
+    invoke<{ candidates: Candidate[]; warnings: string[] }>("hydrate_search", {
+      collection,
+      query,
+    }),
   candidateFields: (collection: string, candidate: Candidate) =>
     invoke<FieldValues>("candidate_fields", { collection, candidate }),
   downloadCover: (collection: string, id: string, url: string) =>

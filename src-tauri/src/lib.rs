@@ -511,7 +511,7 @@ async fn hydrate_search(
     state: State<'_, Mutex<AppState>>,
     collection: String,
     query: String,
-) -> Result<Vec<hydrate::Candidate>, String> {
+) -> Result<hydrate::SearchOutcome, String> {
     // Le verrou ne doit jamais traverser un await : on extrait la source puis
     // on le relâche avant les appels réseau.
     let source = {
