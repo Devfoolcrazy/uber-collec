@@ -87,9 +87,31 @@ pub fn sources_catalog() -> Vec<SourceInfo> {
 pub(crate) fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent("UberCollec/0.1 (gestionnaire de collection personnel)")
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| e.to_string())
+}
+
+/// Envoie une requête en réessayant une fois, après deux secondes, sur les
+/// échecs passagers : erreur réseau, 429, 5xx. Les APIs publiques toussent
+/// régulièrement — un seul retry absorbe l'essentiel sans les harceler.
+async fn send_with_retry(req: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
+    let second_try = req.try_clone();
+    let first = req.send().await;
+    let transient = match &first {
+        Ok(r) => {
+            r.status().is_server_error() || r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+        }
+        Err(_) => true,
+    };
+    let Some(second_try) = second_try else {
+        return first.map_err(|e| e.to_string());
+    };
+    if !transient {
+        return first.map_err(|e| e.to_string());
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+    second_try.send().await.map_err(|e| e.to_string())
 }
 
 /// Une chaîne de 10 ou 13 chiffres est traitée comme un code-barres.
@@ -202,11 +224,12 @@ async fn musicbrainz_query(
     client: &reqwest::Client,
     q: &str,
 ) -> Result<Vec<Candidate>, String> {
-    let resp: serde_json::Value = client
+    let resp: serde_json::Value = send_with_retry(
+        client
         .get("https://musicbrainz.org/ws/2/release/")
         .query(&[("query", q), ("fmt", "json"), ("limit", "8")])
-        .send()
-        .await
+    )
+    .await
         .map_err(|e| format!("MusicBrainz : {e}"))?
         .error_for_status()
         .map_err(|e| format!("MusicBrainz : {e}"))?
@@ -279,12 +302,13 @@ pub(crate) async fn discogs(
     } else {
         params.push(("q", query));
     }
-    let resp: serde_json::Value = client
+    let resp: serde_json::Value = send_with_retry(
+        client
         .get("https://api.discogs.com/database/search")
         .header("Authorization", format!("Discogs token={}", token.trim()))
         .query(&params)
-        .send()
-        .await
+    )
+    .await
         .map_err(|e| format!("Discogs : {e}"))?
         .error_for_status()
         .map_err(|e| {
@@ -389,7 +413,7 @@ async fn tmdb_get(
     } else {
         req = req.query(&[("api_key", key)]);
     }
-    let resp = req.send().await.map_err(|e| format!("TMDB : {e}"))?;
+    let resp = send_with_retry(req).await.map_err(|e| format!("TMDB : {e}"))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
         return Err("TMDB : clé d'API refusée — vérifiez-la dans themoviedb.org → Paramètres → API".into());
     }
@@ -591,7 +615,8 @@ pub(crate) async fn bnf(
     } else {
         format!("bib.title all \"{}\"", query.replace('"', ""))
     };
-    let xml = client
+    let xml = send_with_retry(
+        client
         .get("https://catalogue.bnf.fr/api/SRU")
         .query(&[
             ("version", "1.2"),
@@ -600,8 +625,8 @@ pub(crate) async fn bnf(
             ("recordSchema", "dublincore"),
             ("maximumRecords", "8"),
         ])
-        .send()
-        .await
+    )
+    .await
         .map_err(|e| format!("BNF : {e}"))?
         .error_for_status()
         .map_err(|e| format!("BNF : {e}"))?
@@ -671,11 +696,12 @@ async fn google_books(
 ) -> Result<Vec<Candidate>, String> {
     let q = if barcode { format!("isbn:{query}") } else { query.to_string() };
     let url = "https://www.googleapis.com/books/v1/volumes";
-    let resp: serde_json::Value = client
+    let resp: serde_json::Value = send_with_retry(
+        client
         .get(url)
         .query(&[("q", q.as_str()), ("maxResults", "8"), ("langRestrict", "fr")])
-        .send()
-        .await
+    )
+    .await
         .map_err(|e| format!("Google Books : {e}"))?
         .error_for_status()
         .map_err(|e| format!("Google Books : {e}"))?
@@ -732,11 +758,12 @@ async fn openlibrary(
 ) -> Result<Vec<Candidate>, String> {
     if barcode {
         let key = format!("ISBN:{query}");
-        let resp: serde_json::Value = client
+        let resp: serde_json::Value = send_with_retry(
+        client
             .get("https://openlibrary.org/api/books")
             .query(&[("bibkeys", key.as_str()), ("format", "json"), ("jscmd", "data")])
-            .send()
-            .await
+    )
+    .await
             .map_err(|e| format!("OpenLibrary : {e}"))?
             .error_for_status()
             .map_err(|e| format!("OpenLibrary : {e}"))?
@@ -765,11 +792,12 @@ async fn openlibrary(
         }]);
     }
 
-    let resp: serde_json::Value = client
+    let resp: serde_json::Value = send_with_retry(
+        client
         .get("https://openlibrary.org/search.json")
         .query(&[("q", query), ("limit", "8")])
-        .send()
-        .await
+    )
+    .await
         .map_err(|e| format!("OpenLibrary : {e}"))?
         .error_for_status()
         .map_err(|e| format!("OpenLibrary : {e}"))?
