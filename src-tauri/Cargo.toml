@@ -1,0 +1,34 @@
+[package]
+name = "uber-collec"
+version = "0.1.0"
+description = "Gestionnaire de collections personnelles"
+authors = ["Rémy Lefebvre"]
+edition = "2021"
+
+[lib]
+name = "uber_collec_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+rusqlite = { version = "0.32", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+csv = "1"
+reqwest = { version = "0.12", features = ["json"] }
+flate2 = "1"
+tar = "0.4"
+tokio = { version = "1", features = ["macros"] }
+image = "0.25"
+webp = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
