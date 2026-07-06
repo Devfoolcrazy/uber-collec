@@ -300,7 +300,13 @@ impl Library {
         schema: &Schema,
         fields: &std::collections::BTreeMap<String, serde_json::Value>,
     ) -> Result<(), String> {
-        for def in schema.fields.iter().filter(|f| f.required) {
+        // Les images ne se saisissent pas à la main (hydratation uniquement) :
+        // « requis » n'a pas de sens pour elles, on l'ignore.
+        for def in schema
+            .fields
+            .iter()
+            .filter(|f| f.required && f.field_type != crate::model::FieldType::Image)
+        {
             let missing = match fields.get(&def.key) {
                 None | Some(serde_json::Value::Null) => true,
                 Some(serde_json::Value::String(s)) => s.trim().is_empty(),

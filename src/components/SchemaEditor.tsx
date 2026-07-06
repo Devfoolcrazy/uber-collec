@@ -300,7 +300,13 @@ export default function SchemaEditor({
               <td className="center">
                 <input
                   type="checkbox"
-                  checked={f.required}
+                  checked={f.type === "image" ? false : f.required}
+                  disabled={f.type === "image"}
+                  title={
+                    f.type === "image"
+                      ? "Une image se remplit par hydratation, jamais à la main : « requis » bloquerait la saisie"
+                      : ""
+                  }
                   onChange={(e) => set(i, { required: e.target.checked })}
                 />
               </td>
