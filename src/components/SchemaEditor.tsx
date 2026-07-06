@@ -46,6 +46,7 @@ interface EditableField {
 function slugKey(label: string, taken: string[]): string {
   let base = label
     .toLowerCase()
+    .replace(/\(.*?\)/g, "") // « Auteur(s) » → auteur, pas auteur_s
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .replace(/[^a-z0-9]+/g, "_")

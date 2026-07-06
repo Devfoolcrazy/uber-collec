@@ -840,65 +840,99 @@ async fn openlibrary(
 // Candidat → champs du schéma cible
 // ---------------------------------------------------------------------------
 
-/// Convertit un candidat en champs, en ne gardant que les clés existant dans
-/// le schéma (les auteurs vont vers `scenariste` pour la BD, `auteur` pour
-/// les livres ; l'EAN vers `ean` ou `isbn`).
+/// Clé de champ réduite à ses lettres/chiffres : `auteur_s` → `auteurs`.
+fn norm_key(key: &str) -> String {
+    key.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// Premier champ du schéma correspondant à l'une des clés canoniques —
+/// insensible aux underscores et au pluriel (`auteur_s` ≡ `auteurs` ≡
+/// `auteur`), pour que les collections custom marchent sans nommage exact.
+fn find_target(schema: &Schema, wanted: &[&str]) -> Option<crate::model::FieldDef> {
+    for w in wanted {
+        let nw = norm_key(w);
+        for f in &schema.fields {
+            let nf = norm_key(&f.key);
+            if nf == nw || nf == format!("{nw}s") || format!("{nf}s") == nw {
+                return Some(f.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Liste de noms → valeur adaptée au type du champ cible (liste, ou texte
+/// joint par « ; » si le champ est un simple texte).
+fn names_value(field: &crate::model::FieldDef, names: &[String]) -> serde_json::Value {
+    match field.field_type {
+        crate::model::FieldType::TextList | crate::model::FieldType::Tags => {
+            serde_json::json!(names)
+        }
+        _ => serde_json::json!(names.join(" ; ")),
+    }
+}
+
+/// Convertit un candidat en champs, en ne gardant que ce qui a un champ
+/// correspondant dans le schéma (correspondance tolérante, voir
+/// [`find_target`]).
 pub fn candidate_to_fields(
     schema: &Schema,
     c: &Candidate,
 ) -> BTreeMap<String, serde_json::Value> {
     let mut out = BTreeMap::new();
-    let has = |key: &str| schema.field(key).is_some();
 
     if let Some(t) = &c.titre {
-        if has("titre") {
-            out.insert("titre".into(), serde_json::json!(t));
+        if let Some(f) = find_target(schema, &["titre"]) {
+            out.insert(f.key, serde_json::json!(t));
         }
     }
     if !c.auteurs.is_empty() {
-        let target = ["scenariste", "auteur", "artiste", "realisateur"]
-            .into_iter()
-            .find(|k| has(k));
-        if let Some(k) = target {
-            out.insert(k.into(), serde_json::json!(c.auteurs));
+        if let Some(f) = find_target(schema, &["scenariste", "auteur", "artiste", "realisateur"]) {
+            out.insert(f.key.clone(), names_value(&f, &c.auteurs));
         }
     }
-    if !c.illustrateurs.is_empty() && has("dessinateur") {
-        out.insert("dessinateur".into(), serde_json::json!(c.illustrateurs));
+    if !c.illustrateurs.is_empty() {
+        if let Some(f) = find_target(schema, &["dessinateur", "illustrateur"]) {
+            out.insert(f.key.clone(), names_value(&f, &c.illustrateurs));
+        }
     }
     if let Some(e) = &c.editeur {
-        let key = ["editeur", "label"].into_iter().find(|k| has(k));
-        if let Some(k) = key {
-            out.insert(k.into(), serde_json::json!(e));
+        if let Some(f) = find_target(schema, &["editeur", "label"]) {
+            out.insert(f.key, serde_json::json!(e));
         }
     }
     if let Some(d) = &c.date_parution {
-        let key = ["date_parution", "date_sortie"].into_iter().find(|k| has(k));
-        if let Some(k) = key {
-            out.insert(k.into(), serde_json::json!(d));
+        if let Some(f) =
+            find_target(schema, &["date_parution", "date_sortie", "date", "annee", "parution"])
+        {
+            out.insert(f.key, serde_json::json!(d));
         }
     }
     if let Some(syn) = &c.synopsis {
-        if has("synopsis") {
-            out.insert("synopsis".into(), serde_json::json!(syn));
+        if let Some(f) = find_target(schema, &["synopsis", "resume", "description"]) {
+            out.insert(f.key, serde_json::json!(syn));
         }
     }
     if let Some(ean) = &c.ean {
-        let key = ["ean", "isbn"].into_iter().find(|k| has(k));
-        if let Some(k) = key {
-            out.insert(k.into(), serde_json::json!(ean));
+        if let Some(f) = find_target(schema, &["ean", "isbn", "code_barres"]) {
+            out.insert(f.key, serde_json::json!(ean));
         }
     }
-    if !c.acteurs.is_empty() && has("acteurs") {
-        out.insert("acteurs".into(), serde_json::json!(c.acteurs));
+    if !c.acteurs.is_empty() {
+        if let Some(f) = find_target(schema, &["acteurs"]) {
+            out.insert(f.key.clone(), names_value(&f, &c.acteurs));
+        }
     }
     // Genre : uniquement s'il correspond à une option existante du schéma —
     // l'hydratation ne crée jamais de nouvelle option, contrairement à
     // l'import CSV.
     if let Some(genre) = &c.genre {
-        if let Some(def) = schema.field("genre") {
+        if let Some(def) = find_target(schema, &["genre", "style"]) {
             if let Some(option) = def.options.iter().find(|o| same_thing(&o.value, genre)) {
-                out.insert("genre".into(), serde_json::json!(option.value));
+                out.insert(def.key.clone(), serde_json::json!(option.value));
             }
         }
     }
@@ -972,6 +1006,44 @@ mod tests {
             clean_bnf_name("Tolkien, John Ronald Reuel (1892-1973). Auteur du texte"),
             "John Ronald Reuel Tolkien"
         );
+    }
+
+    #[test]
+    fn candidate_maps_to_custom_schema_with_loose_keys() {
+        // Collection custom type LDVELH : clés générées depuis les libellés
+        // (« Auteur(s) » → auteur_s, champ texte simple).
+        let schema: Schema = serde_yaml::from_str(
+            "name: LDVELH\nid_prefix: LDV\nfields:\n\
+             - { key: titre, label: Titre, type: text, required: true }\n\
+             - { key: auteur_s, label: 'Auteur(s)', type: text }\n\
+             - { key: date, label: Date, type: date }\n\
+             - { key: isbn, label: ISBN, type: text }\n",
+        )
+        .unwrap();
+        let c = Candidate {
+            source: "BNF".into(),
+            titre: Some("Le sorcier de la montagne de feu".into()),
+            auteurs: vec!["Steve Jackson".into(), "Ian Livingstone".into()],
+            illustrateurs: vec!["Vlado Krizan".into()],
+            editeur: Some("Gallimard jeunesse".into()),
+            date_parution: Some("2018".into()),
+            ean: Some("9782075100649".into()),
+            synopsis: None,
+            cover_url: None,
+            score: None,
+            genre: None,
+            acteurs: Vec::new(),
+        };
+        let fields = candidate_to_fields(&schema, &c);
+        // auteur_s ≡ auteurs : rempli, joint en texte car champ simple.
+        assert_eq!(
+            fields["auteur_s"],
+            serde_json::json!("Steve Jackson ; Ian Livingstone")
+        );
+        assert_eq!(fields["date"], serde_json::json!("2018"));
+        assert_eq!(fields["isbn"], serde_json::json!("9782075100649"));
+        // Pas de champ dessinateur ni éditeur → ignorés sans erreur.
+        assert!(!fields.contains_key("dessinateur"));
     }
 
     #[test]
