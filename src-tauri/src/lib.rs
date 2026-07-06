@@ -619,6 +619,64 @@ async fn download_cover(
     Ok(rel)
 }
 
+/// Remplace la couverture d'une fiche par une image locale (JPG/PNG…),
+/// convertie en WebP. Nom de fichier versionné pour déjouer le cache
+/// d'images ; l'ancien fichier est supprimé (l'historique Git le garde).
+#[tauri::command]
+async fn set_cover_from_file(
+    app: AppHandle,
+    state: State<'_, Mutex<AppState>>,
+    collection: String,
+    id: String,
+    path: String,
+) -> Result<String, String> {
+    let root = lib_root(&state)?;
+    let bytes = std::fs::read(&path).map_err(|e| format!("lecture de l'image : {e}"))?;
+    let webp = tauri::async_runtime::spawn_blocking(move || hydrate::to_webp(&bytes, 400))
+        .await
+        .map_err(|e| e.to_string())??;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs();
+    let rel = format!("images/{collection}/{id}-{stamp}.webp");
+    let dest = root.join(&rel);
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&dest, webp).map_err(|e| e.to_string())?;
+
+    {
+        let guard = state.lock().unwrap();
+        let AppState { library, index } = &*guard;
+        let (lib, idx) = match (library, index) {
+            (Some(l), Some(i)) => (l, i),
+            _ => return Err("aucune bibliothèque ouverte".into()),
+        };
+        let schema = lib.load_schema(&collection)?;
+        let image_key = schema
+            .fields
+            .iter()
+            .find(|f| f.field_type == model::FieldType::Image)
+            .map(|f| f.key.clone())
+            .ok_or("le schéma n'a pas de champ image")?;
+        let mut item = lib.load_item(&collection, &id)?;
+        // Ancien fichier : supprimé s'il vit bien dans images/ (jamais rien
+        // d'autre), l'historique Git en garde une copie.
+        if let Some(old) = item.fields.get(&image_key).and_then(|v| v.as_str()) {
+            if old.starts_with("images/") && old != rel {
+                let _ = std::fs::remove_file(root.join(old));
+            }
+        }
+        item.fields.insert(image_key, serde_json::json!(rel));
+        lib.save_item(&collection, &item)?;
+        let series = lib.load_series(&collection)?;
+        idx.upsert_item(&collection, &schema, &series, &item)?;
+    }
+    sync::auto_commit(&app, format!("Image remplacée : {id}"));
+    Ok(rel)
+}
+
 // ---------------------------------------------------------------------------
 // Commandes : enrichissement de masse
 // ---------------------------------------------------------------------------
@@ -753,6 +811,7 @@ pub fn run() {
             hydrate_search,
             candidate_fields,
             download_cover,
+            set_cover_from_file,
             set_api_key,
             api_keys_status,
             hydration_sources,

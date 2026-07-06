@@ -1215,3 +1215,9 @@ ul.candidates {
   width: 90px;
   border-radius: 4px;
 }
+
+.image-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}

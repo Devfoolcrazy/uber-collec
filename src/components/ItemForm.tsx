@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { api, coverSrc, FieldDef, FieldValues, Item, Schema, Series, Statut } from "../api";
 
 interface Props {
@@ -282,13 +282,35 @@ export default function ItemForm({
       }
       case "image": {
         const rel = value as string | undefined;
-        if (rel && libraryPath) {
-          return <img className="form-cover" src={coverSrc(libraryPath, rel)} alt="" />;
-        }
+        const pickImage = async () => {
+          if (!item) return;
+          const file = await open({
+            title: "Choisir une image",
+            filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif"] }],
+          });
+          if (typeof file !== "string") return;
+          try {
+            const newRel = await api.setCoverFromFile(collection, item.id, file);
+            set(def.key, newRel);
+          } catch (e) {
+            setError(String(e));
+          }
+        };
         return (
-          <span className="muted">
-            Récupérée automatiquement via « Scanner » ou « Compléter depuis les bases »
-          </span>
+          <div className="image-field">
+            {rel && libraryPath ? (
+              <img className="form-cover" src={coverSrc(libraryPath, rel)} alt="" />
+            ) : (
+              <span className="muted">
+                Récupérée via « Scanner » / « Compléter depuis les bases »
+              </span>
+            )}
+            {item && (
+              <button type="button" className="ghost" onClick={pickImage}>
+                {rel ? "Remplacer l'image…" : "Choisir une image…"}
+              </button>
+            )}
+          </div>
         );
       }
       default:

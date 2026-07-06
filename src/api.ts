@@ -251,6 +251,8 @@ export const api = {
     invoke<FieldValues>("candidate_fields", { collection, candidate }),
   downloadCover: (collection: string, id: string, url: string) =>
     invoke<string>("download_cover", { collection, id, url }),
+  setCoverFromFile: (collection: string, id: string, path: string) =>
+    invoke<string>("set_cover_from_file", { collection, id, path }),
   setApiKey: (provider: "tmdb" | "discogs", key: string) =>
     invoke<void>("set_api_key", { provider, key }),
   apiKeysStatus: () => invoke<{ tmdb: boolean; discogs: boolean }>("api_keys_status"),
