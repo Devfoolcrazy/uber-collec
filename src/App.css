@@ -1185,6 +1185,28 @@ ul.candidates {
   overflow: hidden;
 }
 
+.candidate-details {
+  font-size: 12px;
+  background: #fafafa;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 6px;
+}
+
+.candidate-details ul {
+  margin: 4px 0 10px;
+  padding-left: 18px;
+}
+
+.candidate-details code {
+  font-size: 11px;
+}
+
+.candidate .candidate-info details summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+
 .candidate-source {
   font-size: 11px;
   color: #9ca3af;

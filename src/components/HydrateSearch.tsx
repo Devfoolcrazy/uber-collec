@@ -1,5 +1,63 @@
 import { useEffect, useRef, useState } from "react";
-import { api, Candidate } from "../api";
+import { api, Candidate, FieldValues } from "../api";
+
+const CANDIDATE_LABELS: [keyof Candidate, string][] = [
+  ["titre", "Titre"],
+  ["auteurs", "Auteurs"],
+  ["illustrateurs", "Dessinateurs"],
+  ["acteurs", "Acteurs"],
+  ["editeur", "Éditeur / label"],
+  ["date_parution", "Date"],
+  ["genre", "Genre"],
+  ["ean", "EAN / ISBN"],
+  ["synopsis", "Synopsis"],
+];
+
+/** Détail d'un candidat : ce qui sera réellement appliqué (mapping backend)
+ *  et ce que la source offre sans champ correspondant dans le schéma. */
+function CandidateDetails({ collection, candidate }: { collection: string; candidate: Candidate }) {
+  const [mapped, setMapped] = useState<FieldValues | null>(null);
+
+  useEffect(() => {
+    api.candidateFields(collection, candidate).then(setMapped).catch(() => setMapped({}));
+  }, [collection, candidate]);
+
+  if (!mapped) return <p className="muted">…</p>;
+
+  const fmt = (v: unknown) => (Array.isArray(v) ? v.join(" ; ") : String(v));
+  const appliedValues = new Set(Object.values(mapped).map(fmt));
+  const unmapped = CANDIDATE_LABELS.filter(([key]) => {
+    const v = candidate[key];
+    const empty = v == null || v === "" || (Array.isArray(v) && v.length === 0);
+    return !empty && !appliedValues.has(fmt(v));
+  });
+
+  return (
+    <div className="candidate-details">
+      <strong>Sera appliqué à la fiche :</strong>
+      {Object.keys(mapped).length === 0 && <p className="muted">rien — aucun champ correspondant.</p>}
+      <ul>
+        {Object.entries(mapped).map(([key, v]) => (
+          <li key={key}>
+            <code>{key}</code> : {fmt(v)}
+          </li>
+        ))}
+      </ul>
+      {unmapped.length > 0 && (
+        <>
+          <strong>Disponible, mais sans champ correspondant dans le schéma :</strong>
+          <ul>
+            {unmapped.map(([key, label]) => (
+              <li key={key}>
+                {label} : {fmt(candidate[key])}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
 
 interface Props {
   collection: string;
@@ -150,6 +208,10 @@ export default function HydrateSearch({
                 </span>
                 {c.synopsis && <span className="candidate-synopsis">{c.synopsis}</span>}
                 <span className="candidate-source">{c.source}</span>
+                <details>
+                  <summary className="muted">Voir les données</summary>
+                  <CandidateDetails collection={collection} candidate={c} />
+                </details>
               </div>
               <button className="primary" onClick={() => onPick(c)}>
                 {pickLabel}
