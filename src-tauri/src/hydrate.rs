@@ -513,16 +513,14 @@ pub(crate) async fn tmdb_strict(
         .collect())
 }
 
-/// Minuscules sans accents ni ponctuation, pour comparer artiste/titre.
+/// Minuscules, sans accents ni aucun séparateur : « Italo-Disco » ≡
+/// « italo disco » ≡ « ItaloDisco ».
 fn norm(s: &str) -> String {
     s.chars()
         .map(crate::model::unaccent)
-        .filter(|c| c.is_ascii_alphanumeric() || c.is_whitespace())
+        .filter(|c| c.is_ascii_alphanumeric())
         .collect::<String>()
         .to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// Deux libellés désignent-ils la même chose ? Égalité normalisée, ou
@@ -1056,16 +1054,18 @@ mod tests {
         let (_, value, added) = ensure_genre(&mut schema, "Italo-Disco").unwrap();
         assert!(added);
         assert_eq!(value, "Italo-Disco");
-        let genre = schema.field("genre").unwrap();
-        assert!(genre.options.iter().any(|o| o.value == "Italo-Disco"));
+        let count_after_add = schema.field("genre").unwrap().options.len();
+        assert!(schema
+            .field("genre")
+            .unwrap()
+            .options
+            .iter()
+            .any(|o| o.value == "Italo-Disco"));
 
-        // Redemander le même → rapproché, pas de doublon.
+        // Redemander le même (autre graphie) → rapproché, pas de doublon.
         let (_, _, added) = ensure_genre(&mut schema, "italo disco").unwrap();
         assert!(!added);
-        assert_eq!(
-            genre.options.len() + 1,
-            schema.field("genre").unwrap().options.len() + 1
-        );
+        assert_eq!(schema.field("genre").unwrap().options.len(), count_after_add);
     }
 
     #[test]
