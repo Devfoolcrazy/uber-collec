@@ -9,6 +9,8 @@ interface Props {
   onNotice: (message: string) => void;
   /** Appelé quand un objet a été créé (wishlist) : compteurs à rafraîchir. */
   onItemsChanged: () => void;
+  /** Ouvre l'onglet Objets filtré sur cette série. */
+  onOpenSerie: (serieId: string) => void;
 }
 
 /** « 1, 2, 3, 5, 6, 9 » → « 1–3, 5–6, 9 » */
@@ -35,6 +37,7 @@ export default function SeriesPanel({
   readOnly,
   onNotice,
   onItemsChanged,
+  onOpenSerie,
 }: Props) {
   const [report, setReport] = useState<SerieReport[]>([]);
   const [incompleteOnly, setIncompleteOnly] = useState(false);
@@ -124,7 +127,13 @@ export default function SeriesPanel({
           {shown.map((s) => (
             <tr key={s.id}>
               <td>
-                <strong>{s.nom}</strong>{" "}
+                <button
+                  className="serie-link"
+                  title="Voir les albums de cette série"
+                  onClick={() => onOpenSerie(s.id)}
+                >
+                  {s.nom}
+                </button>{" "}
                 <span className="muted">({s.possedes.length})</span>
               </td>
               <td className="mono">{ranges(s.possedes) || "—"}</td>

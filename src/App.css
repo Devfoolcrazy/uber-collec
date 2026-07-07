@@ -1437,3 +1437,17 @@ ul.candidates {
   text-align: left;
   color: var(--muted);
 }
+
+.serie-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.serie-link:hover {
+  color: var(--accent);
+  background: none;
+}

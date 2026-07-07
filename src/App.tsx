@@ -722,6 +722,11 @@ export default function App() {
                 void refreshItems();
                 void refreshCollections();
               }}
+              onOpenSerie={(serieId) => {
+                setSerieFilter(serieId);
+                setStatutFilter("tous");
+                setColTab("objets");
+              }}
             />
           </>
         ) : current && schema ? (
