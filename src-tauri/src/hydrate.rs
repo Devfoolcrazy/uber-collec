@@ -92,26 +92,49 @@ pub(crate) fn client() -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Envoie une requête en réessayant une fois, après deux secondes, sur les
-/// échecs passagers : erreur réseau, 429, 5xx. Les APIs publiques toussent
-/// régulièrement — un seul retry absorbe l'essentiel sans les harceler.
-async fn send_with_retry(req: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
-    let second_try = req.try_clone();
-    let first = req.send().await;
-    let transient = match &first {
-        Ok(r) => {
-            r.status().is_server_error() || r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
-        }
-        Err(_) => true,
-    };
-    let Some(second_try) = second_try else {
-        return first.map_err(|e| e.to_string());
-    };
-    if !transient {
-        return first.map_err(|e| e.to_string());
+/// Masque les valeurs de clés API dans un message (les erreurs HTTP
+/// embarquent l'URL complète, clé comprise).
+pub(crate) fn scrub_keys(msg: &str) -> String {
+    let mut out = String::with_capacity(msg.len());
+    let mut rest = msg;
+    while let Some(i) = rest.find("key=") {
+        let value_start = i + 4;
+        out.push_str(&rest[..value_start]);
+        let after = &rest[value_start..];
+        let end = after.find(['&', ' ', ')']).unwrap_or(after.len());
+        out.push_str("•••");
+        rest = &after[end..];
     }
-    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-    second_try.send().await.map_err(|e| e.to_string())
+    out.push_str(rest);
+    out
+}
+
+/// Envoie une requête en réessayant (jusqu'à 3 tentatives, attente
+/// croissante) sur les échecs passagers : erreur réseau, 429, 5xx. Google
+/// Books, notamment, alterne 200 et 503 d'une seconde à l'autre.
+async fn send_with_retry(req: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
+    let mut delay_ms = 2000u64;
+    let mut current = req;
+    for attempt in 0..3u8 {
+        let next = current.try_clone();
+        let result = current.send().await;
+        let transient = match &result {
+            Ok(r) => {
+                r.status().is_server_error()
+                    || r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+            }
+            Err(_) => true,
+        };
+        match (transient && attempt < 2, next) {
+            (true, Some(retry)) => {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                delay_ms *= 2;
+                current = retry;
+            }
+            _ => return result.map_err(|e| scrub_keys(&e.to_string())),
+        }
+    }
+    unreachable!("la boucle retourne toujours avant")
 }
 
 /// Une chaîne de 10 ou 13 chiffres est traitée comme un code-barres.
@@ -499,15 +522,15 @@ async fn tmdb_get(
     } else {
         req = req.query(&[("api_key", key)]);
     }
-    let resp = send_with_retry(req).await.map_err(|e| format!("TMDB : {e}"))?;
+    let resp = send_with_retry(req).await.map_err(|e| scrub_keys(&format!("TMDB : {e}")))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
         return Err("TMDB : clé d'API refusée — vérifiez-la dans themoviedb.org → Paramètres → API".into());
     }
     resp.error_for_status()
-        .map_err(|e| format!("TMDB : {e}"))?
+        .map_err(|e| scrub_keys(&format!("TMDB : {e}")))?
         .json()
         .await
-        .map_err(|e| format!("TMDB : {e}"))
+        .map_err(|e| scrub_keys(&format!("TMDB : {e}")))
 }
 
 pub(crate) async fn tmdb(
@@ -792,12 +815,12 @@ pub(crate) async fn google_books(
         req
     )
     .await
-        .map_err(|e| format!("Google Books : {e}"))?
+        .map_err(|e| scrub_keys(&format!("Google Books : {e}")))?
         .error_for_status()
-        .map_err(|e| format!("Google Books : {e}"))?
+        .map_err(|e| scrub_keys(&format!("Google Books : {e}")))?
         .json()
         .await
-        .map_err(|e| format!("Google Books : {e}"))?;
+        .map_err(|e| scrub_keys(&format!("Google Books : {e}")))?;
 
     let empty = Vec::new();
     let items = resp["items"].as_array().unwrap_or(&empty);
@@ -1099,6 +1122,17 @@ pub async fn fetch_cover_webp(url: &str) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scrub_hides_api_keys() {
+        let msg = "Google Books : 503 for url (https://x.googleapis.com/v?q=isbn:123&key=AIzaSySECRET&lang=fr)";
+        let scrubbed = scrub_keys(msg);
+        assert!(!scrubbed.contains("AIzaSySECRET"));
+        assert!(scrubbed.contains("key=•••&lang=fr"));
+        assert_eq!(scrub_keys("sans clé"), "sans clé");
+        // api_key= (TMDB) est couvert par le motif key=.
+        assert!(!scrub_keys("…?api_key=SECRET123)").contains("SECRET123"));
+    }
 
     #[test]
     fn barcode_detection() {
