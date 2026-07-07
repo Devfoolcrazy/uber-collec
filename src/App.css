@@ -381,6 +381,26 @@ select:focus {
   cursor: default;
 }
 
+/* --- Étiquettes à faire ------------------------------------------------------ */
+
+.labels-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.label-cote {
+  font-size: 16px;
+  font-weight: 700;
+  color: #3730a3;
+  white-space: nowrap;
+}
+
+.labels-table .col-done {
+  width: 90px;
+  text-align: right;
+}
+
 /* --- Tableau de bord --------------------------------------------------------- */
 
 .dashboard {

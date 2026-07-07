@@ -741,6 +741,49 @@ fn import_csv(
 }
 
 // ---------------------------------------------------------------------------
+// Commandes : étiquettes à faire
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn labels_todo(
+    state: SharedState,
+    collection: Option<String>,
+) -> Result<Vec<IndexedItem>, String> {
+    with_state(&state, |_, idx| idx.labels_todo(collection.as_deref()))
+}
+
+#[tauri::command]
+fn labels_count(state: SharedState) -> Result<u64, String> {
+    with_state(&state, |_, idx| idx.labels_todo_count())
+}
+
+#[derive(Deserialize)]
+struct LabelRef {
+    collection: String,
+    id: String,
+}
+
+/// Pointe un lot d'étiquettes comme faites.
+#[tauri::command]
+fn mark_labeled(app: AppHandle, state: SharedState, refs: Vec<LabelRef>) -> Result<u64, String> {
+    let count = refs.len() as u64;
+    with_state(&state, |lib, idx| {
+        idx.bulk_begin()?;
+        for r in &refs {
+            let item = lib.mark_labeled(&r.collection, &r.id)?;
+            let schema = lib.load_schema(&r.collection)?;
+            let series = lib.load_series(&r.collection)?;
+            idx.upsert_item(&r.collection, &schema, &series, &item)?;
+        }
+        idx.bulk_commit()
+    })?;
+    if count > 0 {
+        sync::auto_commit(&app, format!("Étiquettes pointées : {count}"));
+    }
+    Ok(count)
+}
+
+// ---------------------------------------------------------------------------
 // Commandes : séries et tableau de bord
 // ---------------------------------------------------------------------------
 
@@ -818,6 +861,9 @@ pub fn run() {
             enrich_start,
             enrich_status,
             enrich_cancel,
+            labels_todo,
+            labels_count,
+            mark_labeled,
             list_series,
             upsert_series,
             series_report,

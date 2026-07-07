@@ -100,7 +100,8 @@ pub struct Schema {
 }
 
 /// Clés système interdites comme clés de champ.
-pub const RESERVED_KEYS: &[&str] = &["id", "cote", "statut", "emplacement", "date_ajout"];
+pub const RESERVED_KEYS: &[&str] =
+    &["id", "cote", "statut", "emplacement", "etiquette", "date_ajout"];
 
 impl Schema {
     pub fn field(&self, key: &str) -> Option<&FieldDef> {
@@ -189,6 +190,10 @@ pub struct Item {
     pub statut: Statut,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emplacement: Option<String>,
+    /// Cote physiquement étiquetée (LetraTag). Divergente de `cote` ou
+    /// absente → l'objet apparaît dans « étiquettes à faire ».
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub etiquette: Option<String>,
     pub date_ajout: String,
     #[serde(flatten)]
     pub fields: BTreeMap<String, serde_json::Value>,

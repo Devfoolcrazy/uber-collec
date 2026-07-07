@@ -248,6 +248,7 @@ impl Library {
             cote: None,
             statut,
             emplacement: None,
+            etiquette: None,
             date_ajout: chrono::Local::now().format("%Y-%m-%d").to_string(),
             fields,
         };
@@ -343,6 +344,15 @@ impl Library {
             .map(|o| o.effective_code())
             .unwrap_or_else(|| derive_code(genre_value));
         Some(format!("{year}-{code}"))
+    }
+
+    /// Pointe l'étiquette physique d'un objet comme faite (pour sa cote
+    /// actuelle). Renvoie l'objet mis à jour.
+    pub fn mark_labeled(&self, slug: &str, id: &str) -> Result<Item, String> {
+        let mut item = self.load_item(slug, id)?;
+        item.etiquette = item.cote.clone();
+        self.save_item(slug, &item)?;
+        Ok(item)
     }
 
     /// Régénère la cote des objets possédés dont l'année ou le genre ne

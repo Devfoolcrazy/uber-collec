@@ -373,6 +373,7 @@ pub fn run_import(
             cote: None,
             statut: Statut::Possede,
             emplacement: None,
+            etiquette: None,
             date_ajout: today.clone(),
             fields,
         };

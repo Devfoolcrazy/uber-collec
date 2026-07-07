@@ -10,7 +10,7 @@ use std::path::Path;
 
 /// Version du schéma SQLite : l'index étant jetable, tout changement de
 /// structure se gère en le recréant de zéro (puis reconstruction).
-const INDEX_VERSION: i64 = 3;
+const INDEX_VERSION: i64 = 4;
 
 /// Filtres structurés de recherche, combinables avec le plein texte.
 #[derive(Debug, Default, serde::Deserialize)]
@@ -76,6 +76,7 @@ impl Index {
                  serie_tome INTEGER,
                  genre TEXT,
                  annee INTEGER,
+                 etiquette TEXT,
                  data TEXT NOT NULL,
                  PRIMARY KEY(collection, id)
              );
@@ -221,14 +222,15 @@ impl Index {
         let (genre, annee) = Self::resolve_genre_annee(schema, item);
         self.conn
             .execute(
-                "INSERT INTO items(collection, id, titre, cote, statut, emplacement, date_ajout, serie_id, serie_nom, serie_tome, genre, annee, data)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                "INSERT INTO items(collection, id, titre, cote, statut, emplacement, date_ajout, serie_id, serie_nom, serie_tome, genre, annee, etiquette, data)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                  ON CONFLICT(collection, id) DO UPDATE SET
                    titre = excluded.titre, cote = excluded.cote, statut = excluded.statut,
                    emplacement = excluded.emplacement, date_ajout = excluded.date_ajout,
                    serie_id = excluded.serie_id, serie_nom = excluded.serie_nom,
                    serie_tome = excluded.serie_tome, genre = excluded.genre,
-                   annee = excluded.annee, data = excluded.data",
+                   annee = excluded.annee, etiquette = excluded.etiquette,
+                   data = excluded.data",
                 params![
                     collection,
                     item.id,
@@ -242,6 +244,7 @@ impl Index {
                     serie_tome,
                     genre,
                     annee,
+                    item.etiquette,
                     data
                 ],
             )
@@ -371,6 +374,62 @@ impl Index {
         let params_ref: Vec<(&str, &dyn rusqlite::ToSql)> =
             params.iter().map(|(k, v)| (*k, v.as_ref() as &dyn rusqlite::ToSql)).collect();
         stmt.query_row(params_ref.as_slice(), |r| r.get(0))
+            .map_err(|e| e.to_string())
+    }
+
+    /// Fiches dont l'étiquette physique est à faire : possédées, cotées, et
+    /// jamais étiquetées ou étiquetées sous une ancienne cote. Triées par
+    /// collection puis cote — l'ordre d'une session d'étiquetage en rayon.
+    pub fn labels_todo(&self, collection: Option<&str>) -> Result<Vec<IndexedItem>, String> {
+        let clause = match collection {
+            Some(_) => " AND i.collection = :collection",
+            None => "",
+        };
+        let sql = format!(
+            "SELECT i.collection, i.id, i.titre, i.cote, i.statut, i.emplacement, i.date_ajout, i.serie_nom, i.serie_tome, i.annee, i.data
+             FROM items i
+             WHERE i.statut = 'possede' AND i.cote IS NOT NULL
+               AND (i.etiquette IS NULL OR i.etiquette != i.cote){clause}
+             ORDER BY i.collection, i.cote"
+        );
+        let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let mut params: Vec<(&str, Box<dyn rusqlite::ToSql>)> = Vec::new();
+        if let Some(c) = collection {
+            params.push((":collection", Box::new(c.to_string())));
+        }
+        let params_ref: Vec<(&str, &dyn rusqlite::ToSql)> =
+            params.iter().map(|(k, v)| (*k, v.as_ref() as &dyn rusqlite::ToSql)).collect();
+        let rows = stmt
+            .query_map(params_ref.as_slice(), |row| {
+                Ok(IndexedItem {
+                    collection: row.get(0)?,
+                    id: row.get(1)?,
+                    titre: row.get(2)?,
+                    cote: row.get(3)?,
+                    statut: row.get(4)?,
+                    emplacement: row.get(5)?,
+                    date_ajout: row.get(6)?,
+                    serie_nom: row.get(7)?,
+                    serie_tome: row.get(8)?,
+                    annee: row.get(9)?,
+                    data: serde_json::from_str(&row.get::<_, String>(10)?)
+                        .unwrap_or(serde_json::Value::Null),
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// Nombre total d'étiquettes à faire, toutes collections confondues.
+    pub fn labels_todo_count(&self) -> Result<u64, String> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM items
+                 WHERE statut = 'possede' AND cote IS NOT NULL
+                   AND (etiquette IS NULL OR etiquette != cote)",
+                [],
+                |r| r.get(0),
+            )
             .map_err(|e| e.to_string())
     }
 
@@ -658,6 +717,47 @@ mod tests {
         assert_ne!(desc[0].titre, "Universal War One");
         // Clé de tri inconnue → pas d'injection, ordre par défaut.
         assert!(index.search("bd", "", &all, Some("evil; DROP"), false, 50, 0).is_ok());
+    }
+
+    #[test]
+    fn labels_todo_lifecycle() {
+        let (_dir, lib, mut index) = setup();
+        let item = bd(&lib, "Lastman T1", "Science-Fiction");
+        // Un souhaité (sans cote) ne doit jamais apparaître.
+        let mut fields = BTreeMap::new();
+        fields.insert("titre".to_string(), json!("Convoité"));
+        lib.create_item("bd", Statut::Souhaite, fields).unwrap();
+        index.rebuild(&lib).unwrap();
+
+        // Fiche neuve → étiquette à faire.
+        let todo = index.labels_todo(None).unwrap();
+        assert_eq!(todo.len(), 1);
+        assert_eq!(todo[0].id, item.id);
+        assert_eq!(index.labels_todo_count().unwrap(), 1);
+
+        // Pointée → disparaît.
+        let labeled = lib.mark_labeled("bd", &item.id).unwrap();
+        let schema = lib.load_schema("bd").unwrap();
+        index.upsert_item("bd", &schema, &[], &labeled).unwrap();
+        assert_eq!(index.labels_todo_count().unwrap(), 0);
+
+        // Cote régénérée (changement de code du genre) → réapparaît.
+        let mut schema = lib.load_schema("bd").unwrap();
+        schema
+            .fields
+            .iter_mut()
+            .find(|f| f.key == "genre")
+            .unwrap()
+            .options
+            .iter_mut()
+            .find(|o| o.value == "Science-Fiction")
+            .unwrap()
+            .code = Some("SCIFI".into());
+        lib.save_schema("bd", &schema).unwrap();
+        let changes = lib.regenerate_stale_cotes("bd").unwrap();
+        assert_eq!(changes.len(), 1);
+        index.rebuild(&lib).unwrap();
+        assert_eq!(index.labels_todo_count().unwrap(), 1, "cote changée → étiquette à refaire");
     }
 
     #[test]

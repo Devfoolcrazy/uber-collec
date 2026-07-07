@@ -283,6 +283,12 @@ export const api = {
   enrichStatus: () => invoke<EnrichProgress>("enrich_status"),
   enrichCancel: () => invoke<void>("enrich_cancel"),
 
+  labelsTodo: (collection?: string) =>
+    invoke<IndexedItem[]>("labels_todo", { collection: collection ?? null }),
+  labelsCount: () => invoke<number>("labels_count"),
+  markLabeled: (refs: { collection: string; id: string }[]) =>
+    invoke<number>("mark_labeled", { refs }),
+
   seriesReport: (collection: string) =>
     invoke<SerieReport[]>("series_report", { collection }),
   dashboardStats: () => invoke<DashboardStats>("dashboard_stats"),

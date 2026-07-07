@@ -25,6 +25,7 @@ import SchemaEditor from "./components/SchemaEditor";
 import SyncPanel from "./components/SyncPanel";
 import MobileSetup from "./components/MobileSetup";
 import ApiKeysPanel from "./components/ApiKeysPanel";
+import LabelsPanel from "./components/LabelsPanel";
 import { SyncStatus } from "./api";
 import "./App.css";
 
@@ -64,6 +65,8 @@ export default function App() {
     () => (localStorage.getItem("viewMode") as "list" | "grid") ?? "list",
   );
   const [showDashboard, setShowDashboard] = useState(false);
+  const [showLabels, setShowLabels] = useState(false);
+  const [labelsCount, setLabelsCount] = useState(0);
   const [schemaEditor, setSchemaEditor] = useState<"create" | "edit" | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [showSyncPanel, setShowSyncPanel] = useState(false);
@@ -110,6 +113,7 @@ export default function App() {
   const refreshCollections = useCallback(async () => {
     const cols = await api.listCollections();
     setCollections(cols);
+    api.labelsCount().then(setLabelsCount).catch(() => {});
     return cols;
   }, []);
 
@@ -468,16 +472,32 @@ export default function App() {
         <nav>
           <button
             className={showDashboard ? "nav-item active" : "nav-item"}
-            onClick={() => setShowDashboard(true)}
+            onClick={() => {
+              setShowLabels(false);
+              setShowDashboard(true);
+            }}
           >
             <span>📊 Tableau de bord</span>
           </button>
+          {!mobile && (
+            <button
+              className={showLabels ? "nav-item active" : "nav-item"}
+              onClick={() => {
+                setShowDashboard(false);
+                setShowLabels(true);
+              }}
+            >
+              <span>🏷 Étiquettes</span>
+              {labelsCount > 0 && <span className="count">{labelsCount}</span>}
+            </button>
+          )}
           {collections.map((c) => (
             <button
               key={c.slug}
               className={c.slug === current && !showDashboard ? "nav-item active" : "nav-item"}
               onClick={() => {
                 setShowDashboard(false);
+                setShowLabels(false);
                 setCurrent(c.slug);
               }}
             >
@@ -494,6 +514,7 @@ export default function App() {
             className="nav-item new-collection"
             onClick={() => {
               setShowDashboard(false);
+              setShowLabels(false);
               setSchemaEditor("create");
             }}
           >
@@ -568,6 +589,17 @@ export default function App() {
             }}
             onCancel={() => setShowApiKeys(false)}
           />
+        ) : showLabels ? (
+          <>
+            {notice && <p className="notice">{notice}</p>}
+            <LabelsPanel
+              collections={collections}
+              onNotice={setNotice}
+              onChanged={() => {
+                api.labelsCount().then(setLabelsCount).catch(() => {});
+              }}
+            />
+          </>
         ) : showSyncPanel ? (
           <SyncPanel
             status={syncStatus ?? { is_repo: false, remote: null, dirty: false, ahead: 0, behind: 0, last_commit: null }}
