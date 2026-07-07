@@ -86,41 +86,50 @@ export default function ItemView({
     }
   }
 
-  const rows = schema.fields
+  const allRows = schema.fields
     .filter((f) => !(f.type === "text" && f.key === titleKey))
     .map((def) => ({ def, node: renderValue(def) }))
     .filter((r) => r.node !== null);
+  // Les textes longs (synopsis…) se lisent en paragraphes, pas en grille.
+  const gridRows = allRows.filter((r) => r.def.type !== "longtext");
+  const longRows = allRows.filter((r) => r.def.type === "longtext");
+  const hasCover = Boolean(coverRel && libraryPath);
 
   return (
     <div className="item-form item-view">
-      <header>
-        <div>
+      <div className="view-hero">
+        {hasCover && (
+          <div className="view-cover-col">
+            <img className="view-cover" src={coverSrc(libraryPath!, coverRel!)} alt={title} />
+            {item.cote && <span className="cote-badge cote-big">{item.cote}</span>}
+          </div>
+        )}
+        <div className="view-main">
           <h2>{title}</h2>
-          <span className="muted">
+          <p className="view-meta muted">
             {item.id} · ajouté le {item.date_ajout}
             {item.statut === "souhaite" && " · ★ wishlist"}
-          </span>
-        </div>
-        {item.cote && <span className="cote-badge cote-big">{item.cote}</span>}
-      </header>
-
-      <div className="view-body">
-        <div className="view-grid">
-          {item.emplacement && (
-            <>
-              <label>Emplacement</label>
-              <div>{item.emplacement}</div>
-            </>
+            {item.emplacement && ` · 📍 ${item.emplacement}`}
+          </p>
+          {!hasCover && item.cote && (
+            <p>
+              <span className="cote-badge cote-big">{item.cote}</span>
+            </p>
           )}
-          {rows.map(({ def, node }) => (
-            <FieldRow key={def.key} label={def.label}>
+          <div className="view-grid">
+            {gridRows.map(({ def, node }) => (
+              <FieldRow key={def.key} label={def.label}>
+                {node}
+              </FieldRow>
+            ))}
+          </div>
+          {longRows.map(({ def, node }) => (
+            <section key={def.key} className="view-long">
+              <h4>{def.label}</h4>
               {node}
-            </FieldRow>
+            </section>
           ))}
         </div>
-        {coverRel && libraryPath && (
-          <img className="view-cover" src={coverSrc(libraryPath, coverRel)} alt={title} />
-        )}
       </div>
 
       <footer>

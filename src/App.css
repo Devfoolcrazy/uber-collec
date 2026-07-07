@@ -889,14 +889,40 @@ textarea:focus {
 
 /* --- Fiche consultation --------------------------------------------------- */
 
-.item-view header {
-  align-items: flex-start;
-  justify-content: space-between;
+.item-view {
+  max-width: 940px;
+  margin: 0 auto;
 }
 
-.item-view h2 {
-  font-size: 20px;
-  margin-bottom: 2px;
+.view-hero {
+  display: flex;
+  gap: 32px;
+  align-items: flex-start;
+}
+
+.view-cover-col {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.view-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.view-main h2 {
+  font-size: 24px;
+  margin: 0 0 4px;
+  line-height: 1.25;
+}
+
+.view-meta {
+  margin: 0 0 18px;
+  font-size: 13px;
 }
 
 .cote-big {
@@ -906,13 +932,34 @@ textarea:focus {
 
 .view-grid {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 8px 14px;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 9px 16px;
+  margin-bottom: 8px;
 }
 
 .view-grid label {
   text-align: right;
   color: var(--muted);
+}
+
+.view-long {
+  margin-top: 18px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 12px;
+}
+
+.view-long h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.item-view footer {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 16px;
+  margin-top: 24px;
 }
 
 .view-longtext {
@@ -1173,9 +1220,17 @@ textarea:focus {
     color: var(--muted);
   }
 
-  .view-body {
-    flex-direction: column-reverse;
+  .view-hero {
+    flex-direction: column;
     align-items: center;
+  }
+
+  .view-cover-col {
+    width: 200px;
+  }
+
+  .view-grid label {
+    text-align: left;
   }
 
   .dash-columns {
@@ -1350,21 +1405,10 @@ ul.candidates {
 
 /* --- Couvertures ----------------------------------------------------------- */
 
-.view-body {
-  display: flex;
-  gap: 24px;
-  align-items: flex-start;
-}
-
-.view-body .view-grid {
-  flex: 1;
-}
-
 .view-cover {
-  width: 220px;
-  flex-shrink: 0;
-  border-radius: 6px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  width: 100%;
+  border-radius: 8px;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.25);
 }
 
 .form-cover {
