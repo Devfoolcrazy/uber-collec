@@ -269,9 +269,10 @@ export const api = {
     invoke<string>("download_cover", { collection, id, url }),
   setCoverFromFile: (collection: string, id: string, path: string) =>
     invoke<string>("set_cover_from_file", { collection, id, path }),
-  setApiKey: (provider: "tmdb" | "discogs", key: string) =>
+  setApiKey: (provider: "tmdb" | "discogs" | "gbooks", key: string) =>
     invoke<void>("set_api_key", { provider, key }),
-  apiKeysStatus: () => invoke<{ tmdb: boolean; discogs: boolean }>("api_keys_status"),
+  apiKeysStatus: () =>
+    invoke<{ tmdb: boolean; discogs: boolean; gbooks: boolean }>("api_keys_status"),
   hydrationSources: () => invoke<SourceInfo[]>("hydration_sources"),
 
   isMobile: () => invoke<boolean>("is_mobile"),

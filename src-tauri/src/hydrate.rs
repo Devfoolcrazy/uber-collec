@@ -56,7 +56,7 @@ pub fn sources_catalog() -> Vec<SourceInfo> {
         SourceInfo {
             id: "livres",
             label: "Livres — BNF, Google Books, OpenLibrary",
-            description: "Recherche par ISBN (douchette) ou titre. Idéal pour tout ce qui a un ISBN : romans, guides, livres-jeux…",
+            description: "Recherche par ISBN (douchette) ou titre. Clé Google Books conseillée (🔑) pour les synopsis sans limitation.",
             requires_key: None,
             fills: &["titre", "auteur", "editeur", "date_parution", "synopsis", "isbn", "ean"],
         },
@@ -69,8 +69,8 @@ pub fn sources_catalog() -> Vec<SourceInfo> {
         },
         SourceInfo {
             id: "cd",
-            label: "Musique — MusicBrainz, Discogs",
-            description: "Recherche par code-barres ou artiste + album. Genres et pochettes via Discogs.",
+            label: "Musique — MusicBrainz, Discogs, iTunes",
+            description: "Recherche par code-barres ou artiste + album. Genres et pochettes via Discogs (🔑) et iTunes (sans clé).",
             requires_key: Some("discogs"),
             fills: &["titre", "artiste", "label", "editeur", "genre", "date_sortie", "ean"],
         },
@@ -150,29 +150,35 @@ fn combine(results: Vec<Result<Vec<Candidate>, String>>) -> Result<SearchOutcome
 pub async fn search(
     source: &str,
     query: &str,
-    tmdb_key: Option<&str>,
-    discogs_token: Option<&str>,
+    keys: &crate::ApiKeys,
 ) -> Result<SearchOutcome, String> {
     match source {
-        "bd" | "livres" => search_books(query).await,
+        "bd" | "livres" => search_books(query, keys.gbooks.as_deref()).await,
         "cd" => {
             let client = client()?;
             let barcode = looks_like_barcode(query);
-            match discogs_token {
+            // MusicBrainz (référence), Discogs si token (genres, éditions),
+            // iTunes (sans clé — pochettes haute résolution, genres).
+            match &keys.discogs {
                 Some(token) => {
-                    // Deux sources en parallèle : MusicBrainz (référence) et
-                    // Discogs (genres, éditions, pochettes complémentaires).
-                    let (mb, dg) = tokio::join!(
+                    let (mb, dg, it) = tokio::join!(
                         musicbrainz(&client, query, barcode),
-                        discogs(&client, token, query, barcode)
+                        discogs(&client, token, query, barcode),
+                        itunes(&client, query, barcode)
                     );
-                    combine(vec![mb, dg])
+                    combine(vec![mb, dg, it])
                 }
-                None => combine(vec![musicbrainz(&client, query, barcode).await]),
+                None => {
+                    let (mb, it) = tokio::join!(
+                        musicbrainz(&client, query, barcode),
+                        itunes(&client, query, barcode)
+                    );
+                    combine(vec![mb, it])
+                }
             }
         }
         "dvd" => {
-            let key = tmdb_key.ok_or(
+            let key = keys.tmdb.as_deref().ok_or(
                 "TMDB_KEY_MISSING : clé d'API TMDB non configurée (themoviedb.org → Paramètres → API)",
             )?;
             if looks_like_barcode(query) {
@@ -189,12 +195,12 @@ pub async fn search(
     }
 }
 
-async fn search_books(query: &str) -> Result<SearchOutcome, String> {
+async fn search_books(query: &str, gbooks_key: Option<&str>) -> Result<SearchOutcome, String> {
     let client = client()?;
     let barcode = looks_like_barcode(query);
     let (bnf, gb, ol) = tokio::join!(
         bnf(&client, query, barcode),
-        google_books(&client, query, barcode),
+        google_books(&client, query, barcode, gbooks_key),
         openlibrary(&client, query, barcode)
     );
     // BNF d'abord : la référence pour le fonds français (BD, mangas).
@@ -271,6 +277,81 @@ async fn musicbrainz_query(
                 genre: None,
                 acteurs: Vec::new(),
             })
+        })
+        .collect())
+}
+
+// ---------------------------------------------------------------------------
+// iTunes Search (CD) — sans clé, pochettes haute résolution, genres
+// ---------------------------------------------------------------------------
+
+pub(crate) async fn itunes(
+    client: &reqwest::Client,
+    query: &str,
+    barcode: bool,
+) -> Result<Vec<Candidate>, String> {
+    let mut params: Vec<(&str, &str)> = vec![("country", "FR"), ("limit", "5")];
+    let cleaned;
+    if barcode {
+        cleaned = query.replace(['-', ' '], "");
+        params.push(("upc", cleaned.as_str()));
+    } else {
+        params.push(("entity", "album"));
+        params.push(("term", query));
+    }
+    let url = if barcode {
+        "https://itunes.apple.com/lookup"
+    } else {
+        "https://itunes.apple.com/search"
+    };
+    let resp: serde_json::Value = send_with_retry(client.get(url).query(&params))
+        .await
+        .map_err(|e| format!("iTunes : {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("iTunes : {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("iTunes : {e}"))?;
+
+    let empty = Vec::new();
+    let results = resp["results"].as_array().unwrap_or(&empty);
+    Ok(results
+        .iter()
+        .filter(|r| r["collectionType"] == "Album" || r["wrapperType"] == "collection")
+        .filter_map(|r| {
+            let titre = s(&r["collectionName"])?;
+            Some(Candidate {
+                source: "iTunes".into(),
+                titre: Some(titre),
+                auteurs: s(&r["artistName"]).map(|a| vec![a]).unwrap_or_default(),
+                illustrateurs: Vec::new(),
+                editeur: None,
+                date_parution: s(&r["releaseDate"]).map(|d| d.chars().take(10).collect()),
+                ean: barcode.then(|| query.replace(['-', ' '], "")),
+                synopsis: None,
+                // 100 px par défaut → on demande le rendu 600 px.
+                cover_url: s(&r["artworkUrl100"])
+                    .map(|u| u.replace("100x100bb", "600x600bb")),
+                score: None,
+                genre: s(&r["primaryGenreName"]),
+                acteurs: Vec::new(),
+            })
+        })
+        .collect())
+}
+
+/// Variante validée pour l'enrichissement automatique.
+pub(crate) async fn itunes_strict(
+    client: &reqwest::Client,
+    artiste: &str,
+    titre: &str,
+) -> Result<Vec<Candidate>, String> {
+    let candidates = itunes(client, &format!("{artiste} {titre}"), false).await?;
+    Ok(candidates
+        .into_iter()
+        .filter(|c| {
+            c.titre.as_deref().is_some_and(|t| same_thing(t, titre))
+                && c.auteurs.iter().any(|a| same_thing(a, artiste))
         })
         .collect())
 }
@@ -692,17 +773,23 @@ pub(crate) async fn bnf(
 // Google Books
 // ---------------------------------------------------------------------------
 
-async fn google_books(
+pub(crate) async fn google_books(
     client: &reqwest::Client,
     query: &str,
     barcode: bool,
+    key: Option<&str>,
 ) -> Result<Vec<Candidate>, String> {
     let q = if barcode { format!("isbn:{query}") } else { query.to_string() };
     let url = "https://www.googleapis.com/books/v1/volumes";
-    let resp: serde_json::Value = send_with_retry(
-        client
+    let mut req = client
         .get(url)
-        .query(&[("q", q.as_str()), ("maxResults", "8"), ("langRestrict", "fr")])
+        .query(&[("q", q.as_str()), ("maxResults", "8"), ("langRestrict", "fr")]);
+    // Avec clé : quota dédié (1000/jour) au lieu du pot commun anonyme (429).
+    if let Some(key) = key {
+        req = req.query(&[("key", key)]);
+    }
+    let resp: serde_json::Value = send_with_retry(
+        req
     )
     .await
         .map_err(|e| format!("Google Books : {e}"))?
@@ -854,7 +941,7 @@ fn norm_key(key: &str) -> String {
 /// Premier champ du schéma correspondant à l'une des clés canoniques —
 /// insensible aux underscores et au pluriel (`auteur_s` ≡ `auteurs` ≡
 /// `auteur`), pour que les collections custom marchent sans nommage exact.
-fn find_target(schema: &Schema, wanted: &[&str]) -> Option<crate::model::FieldDef> {
+pub(crate) fn find_target(schema: &Schema, wanted: &[&str]) -> Option<crate::model::FieldDef> {
     for w in wanted {
         let nw = norm_key(w);
         for f in &schema.fields {
@@ -977,8 +1064,12 @@ pub fn candidate_to_fields(
 // ---------------------------------------------------------------------------
 
 /// Convertit une image (JPEG/PNG…) en WebP qualité 80, largeur max 400 px.
+/// Rejette les vignettes minuscules (placeholders de certaines sources).
 pub fn to_webp(bytes: &[u8], max_width: u32) -> Result<Vec<u8>, String> {
     let img = image::load_from_memory(bytes).map_err(|e| format!("image illisible : {e}"))?;
+    if img.width() < 120 || img.height() < 120 {
+        return Err(format!("image trop petite ({}×{})", img.width(), img.height()));
+    }
     let img = if img.width() > max_width {
         img.resize(max_width, 10_000, image::imageops::FilterType::Lanczos3)
     } else {
@@ -1199,6 +1290,28 @@ mod tests {
         assert!(!strict.is_empty(), "le film de 1997 doit passer le filtre strict");
     }
 
+    /// Test réseau réel iTunes : `cargo test itunes_live -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn itunes_live() {
+        let client = client().unwrap();
+        let strict = itunes_strict(&client, "ACDC", "Ballbreaker").await.unwrap();
+        println!("{} candidats validés", strict.len());
+        for c in strict.iter().take(2) {
+            println!(
+                "  {:?} — {:?} genre={:?} cover600={}",
+                c.titre,
+                c.auteurs,
+                c.genre,
+                c.cover_url.as_deref().unwrap_or("").contains("600x600")
+            );
+        }
+        assert!(!strict.is_empty());
+        let cover = strict[0].cover_url.clone().unwrap();
+        let webp = fetch_cover_webp(&cover).await.unwrap();
+        println!("pochette webp: {} octets", webp.len());
+    }
+
     /// Test réseau réel CD : `cargo test mb_live -- --ignored --nocapture`
     #[tokio::test]
     #[ignore]
@@ -1228,14 +1341,20 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn hydrate_live() {
-        let by_ean = search("bd", "9782344044438", None, None).await.unwrap().candidates;
+        let by_ean = search("bd", "9782344044438", &crate::ApiKeys::default())
+            .await
+            .unwrap()
+            .candidates;
         println!("EAN → {} candidats", by_ean.len());
         for c in &by_ean {
             println!("  [{}] {:?} — {:?} ({:?}) cover: {}", c.source, c.titre, c.auteurs, c.date_parution, c.cover_url.is_some());
         }
         assert!(!by_ean.is_empty());
 
-        let by_title = search("bd", "Lastman Balak", None, None).await.unwrap().candidates;
+        let by_title = search("bd", "Lastman Balak", &crate::ApiKeys::default())
+            .await
+            .unwrap()
+            .candidates;
         println!("titre → {} candidats", by_title.len());
         assert!(!by_title.is_empty());
 

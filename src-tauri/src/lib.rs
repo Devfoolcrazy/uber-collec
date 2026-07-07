@@ -43,6 +43,17 @@ struct Config {
     /// Token personnel Discogs (seconde source CD).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     discogs_token: Option<String>,
+    /// Clé Google Books (synopsis/couvertures sans limitation 429).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    google_books_key: Option<String>,
+}
+
+/// Clés API utiles à l'hydratation, extraites de la configuration.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ApiKeys {
+    pub tmdb: Option<String>,
+    pub discogs: Option<String>,
+    pub gbooks: Option<String>,
 }
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -52,11 +63,14 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| e.to_string())
 }
 
-/// (clé TMDB, token Discogs) depuis la configuration.
-pub(crate) fn api_keys_from_config(app: &AppHandle) -> (Option<String>, Option<String>) {
+pub(crate) fn api_keys_from_config(app: &AppHandle) -> ApiKeys {
     match load_config(app) {
-        Ok(c) => (c.tmdb_api_key, c.discogs_token),
-        Err(_) => (None, None),
+        Ok(c) => ApiKeys {
+            tmdb: c.tmdb_api_key,
+            discogs: c.discogs_token,
+            gbooks: c.google_books_key,
+        },
+        Err(_) => ApiKeys::default(),
     }
 }
 
@@ -522,8 +536,8 @@ async fn hydrate_search(
             .source
             .ok_or("cette collection n'a pas de source d'hydratation associée")?
     };
-    let (tmdb_key, discogs_token) = api_keys_from_config(&app);
-    hydrate::search(&source, query.trim(), tmdb_key.as_deref(), discogs_token.as_deref()).await
+    let keys = api_keys_from_config(&app);
+    hydrate::search(&source, query.trim(), &keys).await
 }
 
 #[tauri::command]
@@ -538,6 +552,7 @@ fn set_api_key(app: AppHandle, provider: String, key: String) -> Result<(), Stri
     match provider.as_str() {
         "tmdb" => config.tmdb_api_key = value,
         "discogs" => config.discogs_token = value,
+        "gbooks" => config.google_books_key = value,
         other => return Err(format!("fournisseur inconnu : {other}")),
     }
     save_config(&app, &config)
@@ -547,6 +562,7 @@ fn set_api_key(app: AppHandle, provider: String, key: String) -> Result<(), Stri
 struct ApiKeysStatus {
     tmdb: bool,
     discogs: bool,
+    gbooks: bool,
 }
 
 #[tauri::command]
@@ -555,6 +571,7 @@ fn api_keys_status(app: AppHandle) -> Result<ApiKeysStatus, String> {
     Ok(ApiKeysStatus {
         tmdb: config.tmdb_api_key.is_some(),
         discogs: config.discogs_token.is_some(),
+        gbooks: config.google_books_key.is_some(),
     })
 }
 

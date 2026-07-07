@@ -9,9 +9,14 @@ interface Props {
 /** Saisie des clés d'API des sources externes. Les clés vivent dans la
  *  configuration locale de l'app, jamais dans la bibliothèque versionnée. */
 export default function ApiKeysPanel({ onDone, onCancel }: Props) {
-  const [status, setStatus] = useState<{ tmdb: boolean; discogs: boolean } | null>(null);
+  const [status, setStatus] = useState<{
+    tmdb: boolean;
+    discogs: boolean;
+    gbooks: boolean;
+  } | null>(null);
   const [tmdb, setTmdb] = useState("");
   const [discogs, setDiscogs] = useState("");
+  const [gbooks, setGbooks] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -23,6 +28,7 @@ export default function ApiKeysPanel({ onDone, onCancel }: Props) {
     try {
       if (tmdb.trim()) await api.setApiKey("tmdb", tmdb.trim());
       if (discogs.trim()) await api.setApiKey("discogs", discogs.trim());
+      if (gbooks.trim()) await api.setApiKey("gbooks", gbooks.trim());
       onDone("Clés API enregistrées");
     } catch (e) {
       setError(String(e));
@@ -54,6 +60,24 @@ export default function ApiKeysPanel({ onDone, onCancel }: Props) {
 
       <section className="sync-option">
         <h3>
+          Google Books — livres, BD, LDVELH{" "}
+          {status?.gbooks && <span className="complete">✓ configurée</span>}
+        </h3>
+        <p className="muted">
+          Synopsis et couvertures d'appoint, sans la limitation anonyme (429).
+          Clé gratuite : console.cloud.google.com → activer « Books API » →
+          Identifiants → Clé API (1 000 requêtes/jour).
+        </p>
+        <input
+          type="password"
+          placeholder={status?.gbooks ? "•••••• (remplacer)" : "clé Google Books (AIza…)"}
+          value={gbooks}
+          onChange={(e) => setGbooks(e.target.value)}
+        />
+      </section>
+
+      <section className="sync-option">
+        <h3>
           TMDB — DVD / Blu-ray{" "}
           {status?.tmdb && <span className="complete">✓ configurée</span>}
         </h3>
@@ -71,7 +95,11 @@ export default function ApiKeysPanel({ onDone, onCancel }: Props) {
       {error && <p className="error">{error}</p>}
 
       <footer>
-        <button className="primary" onClick={save} disabled={!tmdb.trim() && !discogs.trim()}>
+        <button
+          className="primary"
+          onClick={save}
+          disabled={!tmdb.trim() && !discogs.trim() && !gbooks.trim()}
+        >
           Enregistrer
         </button>
         <button onClick={onCancel}>Fermer</button>

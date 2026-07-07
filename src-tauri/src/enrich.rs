@@ -97,8 +97,8 @@ async fn run_inner(app: &tauri::AppHandle, collection: &str) -> Result<(), Strin
     };
     let mut schema_dirty = false;
     let source = schema.source.clone().unwrap_or_default();
-    let (tmdb_key, discogs_token) = crate::api_keys_from_config(app);
-    if source == "dvd" && tmdb_key.is_none() {
+    let keys = crate::api_keys_from_config(app);
+    if source == "dvd" && keys.tmdb.is_none() {
         return Err("clé d'API TMDB non configurée — lancez une recherche « Scanner » sur un DVD pour la saisir".into());
     }
     let lib = Library::open(&root)?;
@@ -112,6 +112,8 @@ async fn run_inner(app: &tauri::AppHandle, collection: &str) -> Result<(), Strin
         .title_field()
         .map(|f| f.key.clone())
         .unwrap_or_default();
+    let synopsis_key =
+        hydrate::find_target(&schema, &["synopsis", "resume", "description"]).map(|f| f.key);
 
     {
         let mut p = progress.lock().unwrap();
@@ -156,7 +158,15 @@ async fn run_inner(app: &tauri::AppHandle, collection: &str) -> Result<(), Strin
             .as_ref()
             .map(|k| is_empty_value(item.fields.get(k)))
             .unwrap_or(false);
-        if !cover_missing && !genre_missing {
+        // Synopsis : comblé seulement pour les livres/BD avec clé Google
+        // Books (seule source de synopsis en masse).
+        let synopsis_missing = match (&synopsis_key, keys.gbooks.is_some()) {
+            (Some(k), true) if source == "bd" || source == "livres" => {
+                is_empty_value(item.fields.get(k))
+            }
+            _ => false,
+        };
+        if !cover_missing && !genre_missing && !synopsis_missing {
             let mut p = progress.lock().unwrap();
             p.processed += 1;
             p.skipped += 1;
@@ -189,7 +199,7 @@ async fn run_inner(app: &tauri::AppHandle, collection: &str) -> Result<(), Strin
                     continue;
                 }
                 let r =
-                    hydrate::tmdb_strict(&client, tmdb_key.as_deref().unwrap(), &titre, annee)
+                    hydrate::tmdb_strict(&client, keys.tmdb.as_deref().unwrap(), &titre, annee)
                         .await;
                 pause().await;
                 r.map(|mut list| {
@@ -216,7 +226,7 @@ async fn run_inner(app: &tauri::AppHandle, collection: &str) -> Result<(), Strin
                     None => Ok(Vec::new()),
                 };
                 pause().await;
-                let dg = match (&discogs_token, artiste.is_empty() || titre.is_empty()) {
+                let dg = match (&keys.discogs, artiste.is_empty() || titre.is_empty()) {
                     (Some(token), false) => {
                         let r = hydrate::discogs_strict(&client, token, &artiste, &titre).await;
                         pause().await;
@@ -224,29 +234,72 @@ async fn run_inner(app: &tauri::AppHandle, collection: &str) -> Result<(), Strin
                     }
                     _ => Ok(Vec::new()),
                 };
-                match (mb, dg) {
-                    (Ok(mut a), Ok(mut b)) => {
-                        a.truncate(1);
-                        b.truncate(1);
-                        a.append(&mut b);
-                        if a.is_empty() && ean.is_none() && (artiste.is_empty() || titre.is_empty()) {
-                            let mut p = progress.lock().unwrap();
-                            p.processed += 1;
-                            p.no_ean += 1;
-                            continue;
-                        }
-                        Ok(a)
+                // iTunes : sans clé — pochettes haute résolution et genres.
+                let it = match &ean {
+                    Some(ean) => {
+                        let r = hydrate::itunes(&client, ean, true).await;
+                        pause().await;
+                        r
                     }
-                    (Err(e), _) | (_, Err(e)) => Err(e),
+                    None if !artiste.is_empty() && !titre.is_empty() => {
+                        let r = hydrate::itunes_strict(&client, &artiste, &titre).await;
+                        pause().await;
+                        r
+                    }
+                    None => Ok(Vec::new()),
+                };
+                // Une source en panne n'annule pas les autres.
+                let mut merged = Vec::new();
+                let mut failures = Vec::new();
+                for result in [mb, dg, it] {
+                    match result {
+                        Ok(mut list) => {
+                            list.truncate(1);
+                            merged.append(&mut list);
+                        }
+                        Err(e) => failures.push(e),
+                    }
+                }
+                if merged.is_empty() && ean.is_none() && (artiste.is_empty() || titre.is_empty()) {
+                    let mut p = progress.lock().unwrap();
+                    p.processed += 1;
+                    p.no_ean += 1;
+                    continue;
+                }
+                if merged.is_empty() && failures.len() == 3 {
+                    Err(failures.join(" · "))
+                } else {
+                    Ok(merged)
                 }
             }
             (_, Some(ean)) => {
-                let r = hydrate::bnf(&client, ean, true).await;
+                // BNF (référence), puis Google Books si clé (synopsis).
+                let bnf_r = hydrate::bnf(&client, ean, true).await;
                 pause().await;
-                r.map(|mut list| {
-                    list.truncate(1);
-                    list
-                })
+                let gb_r = if keys.gbooks.is_some() {
+                    let r =
+                        hydrate::google_books(&client, ean, true, keys.gbooks.as_deref()).await;
+                    pause().await;
+                    r
+                } else {
+                    Ok(Vec::new())
+                };
+                let mut merged = Vec::new();
+                let mut failures = Vec::new();
+                for result in [bnf_r, gb_r] {
+                    match result {
+                        Ok(mut list) => {
+                            list.truncate(1);
+                            merged.append(&mut list);
+                        }
+                        Err(e) => failures.push(e),
+                    }
+                }
+                if merged.is_empty() && !failures.is_empty() {
+                    Err(failures.join(" · "))
+                } else {
+                    Ok(merged)
+                }
             }
             (_, None) => {
                 let mut p = progress.lock().unwrap();
@@ -297,15 +350,23 @@ async fn run_inner(app: &tauri::AppHandle, collection: &str) -> Result<(), Strin
         }
 
         // Couverture : essaie chaque source dans l'ordre jusqu'au succès
-        // (Cover Art Archive renvoie 404 quand la pochette manque).
+        // (Cover Art Archive renvoie 404 quand la pochette manque), avec
+        // OpenLibrary par ISBN en filet pour les livres/BD.
         let mut got_cover = false;
-        let cover_urls: Vec<&String> = if cover_missing {
-            candidates.iter().filter_map(|c| c.cover_url.as_ref()).collect()
+        let mut cover_urls: Vec<String> = if cover_missing {
+            candidates.iter().filter_map(|c| c.cover_url.clone()).collect()
         } else {
             Vec::new()
         };
+        if cover_missing && matches!(source.as_str(), "bd" | "livres") {
+            if let Some(ean) = &ean {
+                cover_urls.push(format!(
+                    "https://covers.openlibrary.org/b/isbn/{ean}-L.jpg?default=false"
+                ));
+            }
+        }
         for url in cover_urls {
-            match hydrate::fetch_cover_webp(url).await {
+            match hydrate::fetch_cover_webp(&url).await {
                 Ok(bytes) => {
                     let rel = format!("images/{collection}/{id}.webp");
                     let path = root.join(&rel);
