@@ -146,8 +146,12 @@ fn commit_all_locked(root: &Path, message: &str) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Push manuel = « tout sauvegarder maintenant » : commite d'abord les
+/// changements en attente (fichiers arrivés hors app, par exemple), sinon
+/// le statut « à pousser » réapparaîtrait aussitôt.
 pub fn push(root: &Path) -> Result<(), String> {
     let _g = GIT_LOCK.lock().unwrap();
+    commit_all_locked(root, "Sauvegarde manuelle")?;
     git(root, &["push"]).map(|_| ())
 }
 
