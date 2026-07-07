@@ -1516,3 +1516,73 @@ tr.serie-complete .serie-link {
 tr.serie-complete .progress-fill {
   background: var(--ok-border);
 }
+
+/* --- Onglets personnes ------------------------------------------------------ */
+
+.persons-panel {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.persons-panel input[type="search"] {
+  width: 280px;
+}
+
+.persons-grid {
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.person-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface);
+  padding: 8px 14px;
+  text-align: left;
+}
+
+.person-row:last-child {
+  border-bottom: none;
+}
+
+.person-row:hover {
+  background: var(--row-hover);
+}
+
+.person-name {
+  flex: 0 0 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.person-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.person-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  min-width: 2px;
+}
+
+.person-count {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 36px;
+  text-align: right;
+}

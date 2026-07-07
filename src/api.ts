@@ -296,6 +296,8 @@ export const api = {
   markLabeled: (refs: { collection: string; id: string }[]) =>
     invoke<number>("mark_labeled", { refs }),
 
+  fieldValues: (collection: string, field: string) =>
+    invoke<[string, number][]>("field_values", { collection, field }),
   removeWishlistTome: (collection: string, serie: string, tome: number) =>
     invoke<number>("remove_wishlist_tome", { collection, serie, tome }),
   seriesReport: (collection: string) =>

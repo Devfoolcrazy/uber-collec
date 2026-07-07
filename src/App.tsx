@@ -26,6 +26,7 @@ import SyncPanel from "./components/SyncPanel";
 import MobileSetup from "./components/MobileSetup";
 import ApiKeysPanel from "./components/ApiKeysPanel";
 import LabelsPanel from "./components/LabelsPanel";
+import PersonsPanel from "./components/PersonsPanel";
 import { SyncStatus } from "./api";
 import "./App.css";
 
@@ -82,7 +83,8 @@ export default function App() {
   const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showApiKeys, setShowApiKeys] = useState(false);
   const [pushing, setPushing] = useState(false);
-  const [colTab, setColTab] = useState<"objets" | "series">("objets");
+  // "objets", "series", ou "person:<clé de champ>" (scénaristes, artistes…)
+  const [colTab, setColTab] = useState<string>("objets");
   const pendingTab = useRef<"objets" | "series" | null>(null);
 
   function switchView(mode: "list" | "grid") {
@@ -705,12 +707,7 @@ export default function App() {
           />
         ) : current && schema && schema.fields.some((f) => f.type === "series_ref") && colTab === "series" ? (
           <>
-            <div className="tabs">
-              <button className="tab" onClick={() => setColTab("objets")}>
-                Objets
-              </button>
-              <button className="tab active">Séries</button>
-            </div>
+            <CollectionTabs schema={schema} active={colTab} onSelect={setColTab} />
             {error && <p className="error">{error}</p>}
             {notice && <p className="notice">{notice}</p>}
             <SeriesPanel
@@ -729,16 +726,24 @@ export default function App() {
               }}
             />
           </>
+        ) : current && schema && colTab.startsWith("person:") ? (
+          <>
+            <CollectionTabs schema={schema} active={colTab} onSelect={setColTab} />
+            {error && <p className="error">{error}</p>}
+            {notice && <p className="notice">{notice}</p>}
+            <PersonsPanel
+              collection={current}
+              field={schema.fields.find((f) => f.key === colTab.slice(7))!}
+              onOpenPerson={(name) => {
+                setQuery(name);
+                setStatutFilter("tous");
+                setColTab("objets");
+              }}
+            />
+          </>
         ) : current && schema ? (
           <>
-            {schema.fields.some((f) => f.type === "series_ref") && (
-              <div className="tabs">
-                <button className="tab active">Objets</button>
-                <button className="tab" onClick={() => setColTab("series")}>
-                  Séries
-                </button>
-              </div>
-            )}
+            <CollectionTabs schema={schema} active={colTab} onSelect={setColTab} />
             <div className="toolbar">
               <input
                 type="search"
@@ -1214,6 +1219,38 @@ export default function App() {
           </>
         ) : null}
       </main>
+    </div>
+  );
+}
+
+/** Barre d'onglets d'une collection : Objets, Séries (si champ série), et un
+ *  onglet par champ liste de textes (scénaristes, artistes, réalisateurs…). */
+function CollectionTabs({
+  schema,
+  active,
+  onSelect,
+}: {
+  schema: Schema;
+  active: string;
+  onSelect: (tab: string) => void;
+}) {
+  const hasSeries = schema.fields.some((f) => f.type === "series_ref");
+  const personFields = schema.fields.filter((f) => f.type === "text[]");
+  if (!hasSeries && personFields.length === 0) return null;
+  const tab = (id: string, label: string) => (
+    <button
+      key={id}
+      className={active === id ? "tab active" : "tab"}
+      onClick={() => onSelect(id)}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="tabs">
+      {tab("objets", "Objets")}
+      {hasSeries && tab("series", "Séries")}
+      {personFields.map((f) => tab(`person:${f.key}`, f.label.replace(/\(.*?\)/g, "").trim()))}
     </div>
   );
 }

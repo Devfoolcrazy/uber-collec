@@ -806,6 +806,16 @@ fn mark_labeled(app: AppHandle, state: SharedState, refs: Vec<LabelRef>) -> Resu
     Ok(count)
 }
 
+/// Valeurs d'un champ avec occurrences (onglets scénaristes/artistes/…).
+#[tauri::command]
+fn field_values(
+    state: SharedState,
+    collection: String,
+    field: String,
+) -> Result<Vec<(String, u64)>, String> {
+    with_state(&state, |_, idx| idx.value_counts(&collection, &field))
+}
+
 /// Retire un tome de la wishlist (toggle du panneau Séries) : supprime la
 /// ou les fiches « souhaité » de ce tome.
 #[tauri::command]
@@ -916,6 +926,7 @@ pub fn run() {
             upsert_series,
             series_report,
             remove_wishlist_tome,
+            field_values,
             dashboard_stats,
         ])
         .run(tauri::generate_context!())

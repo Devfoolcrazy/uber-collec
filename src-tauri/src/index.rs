@@ -433,6 +433,46 @@ impl Index {
             .map_err(|e| e.to_string())
     }
 
+    /// Valeurs distinctes d'un champ (texte ou liste de textes) avec leur
+    /// nombre d'occurrences — les onglets « personnes » (scénaristes,
+    /// artistes, réalisateurs…).
+    pub fn value_counts(
+        &self,
+        collection: &str,
+        field_key: &str,
+    ) -> Result<Vec<(String, u64)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT data FROM items WHERE collection = ?1 AND statut = 'possede'")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([collection], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        let mut counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        for data in rows {
+            let data = data.map_err(|e| e.to_string())?;
+            let parsed: serde_json::Value = serde_json::from_str(&data).unwrap_or_default();
+            match parsed.get(field_key) {
+                Some(serde_json::Value::Array(values)) => {
+                    for v in values.iter().filter_map(|v| v.as_str()) {
+                        let v = v.trim();
+                        if !v.is_empty() {
+                            *counts.entry(v.to_string()).or_insert(0) += 1;
+                        }
+                    }
+                }
+                Some(serde_json::Value::String(s)) if !s.trim().is_empty() => {
+                    *counts.entry(s.trim().to_string()).or_insert(0) += 1;
+                }
+                _ => {}
+            }
+        }
+        let mut out: Vec<(String, u64)> = counts.into_iter().collect();
+        // Les plus représentés d'abord, alphabétique à égalité.
+        out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+        Ok(out)
+    }
+
     /// Répartition des objets possédés par genre, décroissante.
     pub fn genre_distribution(&self, collection: &str) -> Result<Vec<(String, u64)>, String> {
         let mut stmt = self
