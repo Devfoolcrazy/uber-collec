@@ -465,6 +465,28 @@ impl Index {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
+    /// Fiches en wishlist pour un tome précis d'une série (pour le toggle
+    /// depuis le panneau Séries).
+    pub fn wishlist_ids_for_tome(
+        &self,
+        collection: &str,
+        serie_id: &str,
+        tome: i64,
+    ) -> Result<Vec<String>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id FROM items
+                 WHERE collection = ?1 AND serie_id = ?2 AND serie_tome = ?3
+                   AND statut = 'souhaite'",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![collection, serie_id, tome], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
     /// Triplets (série, tome, statut) de tous les objets rattachés à une série.
     pub fn series_rows(
         &self,

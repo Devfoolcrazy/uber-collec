@@ -62,6 +62,17 @@ export default function SeriesPanel({
     await refresh();
   }
 
+  async function removeFromWishlist(serie: SerieReport, tome: number) {
+    try {
+      await api.removeWishlistTome(collection, serie.id, tome);
+      onNotice(`« ${serie.nom} » Tome ${tome} retiré de la wishlist`);
+      onItemsChanged();
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function addToWishlist(serie: SerieReport, tome: number) {
     const titleKey =
       schema.fields.find((f) => f.type === "text" && f.required)?.key ?? "titre";
@@ -124,9 +135,20 @@ export default function SeriesPanel({
                   <span className="gap-chips">
                     {s.manquants.map((t) =>
                       s.souhaites.includes(t) ? (
-                        <span key={t} className="chip chip-wished" title="Déjà en wishlist">
-                          T{t} ★
-                        </span>
+                        readOnly ? (
+                          <span key={t} className="chip chip-wished" title="En wishlist">
+                            T{t} ★
+                          </span>
+                        ) : (
+                          <button
+                            key={t}
+                            className="chip chip-wished"
+                            title="Retirer de la wishlist"
+                            onClick={() => removeFromWishlist(s, t)}
+                          >
+                            T{t} ★
+                          </button>
+                        )
                       ) : readOnly ? (
                         <span key={t} className="chip">
                           T{t}

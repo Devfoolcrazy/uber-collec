@@ -806,6 +806,30 @@ fn mark_labeled(app: AppHandle, state: SharedState, refs: Vec<LabelRef>) -> Resu
     Ok(count)
 }
 
+/// Retire un tome de la wishlist (toggle du panneau Séries) : supprime la
+/// ou les fiches « souhaité » de ce tome.
+#[tauri::command]
+fn remove_wishlist_tome(
+    app: AppHandle,
+    state: SharedState,
+    collection: String,
+    serie: String,
+    tome: i64,
+) -> Result<u64, String> {
+    let removed = with_state(&state, |lib, idx| {
+        let ids = idx.wishlist_ids_for_tome(&collection, &serie, tome)?;
+        for id in &ids {
+            lib.delete_item(&collection, id)?;
+            idx.remove_item(&collection, id)?;
+        }
+        Ok(ids.len() as u64)
+    })?;
+    if removed > 0 {
+        sync::auto_commit(&app, format!("Retiré de la wishlist : {serie} T{tome}"));
+    }
+    Ok(removed)
+}
+
 // ---------------------------------------------------------------------------
 // Commandes : séries et tableau de bord
 // ---------------------------------------------------------------------------
@@ -891,6 +915,7 @@ pub fn run() {
             list_series,
             upsert_series,
             series_report,
+            remove_wishlist_tome,
             dashboard_stats,
         ])
         .run(tauri::generate_context!())

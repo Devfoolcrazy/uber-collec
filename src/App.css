@@ -483,6 +483,15 @@ select:focus {
   border-color: var(--warn-border);
   background: var(--warn-bg);
   color: var(--warn-ink);
+}
+
+button.chip-wished:hover {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-ink);
+}
+
+span.chip-wished {
   cursor: default;
 }
 
