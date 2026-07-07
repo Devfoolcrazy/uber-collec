@@ -217,6 +217,27 @@ export default function App() {
     }
   }, [current, query, filtersKey, sortKey, sortDesc]);
 
+  async function loadAll() {
+    if (!current || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const rest = await api.searchItems(
+        current,
+        query,
+        filters,
+        sortKey,
+        sortDesc,
+        1_000_000,
+        items.length,
+      );
+      setItems((prev) => [...prev, ...rest]);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
   async function loadMore() {
     if (!current || loadingMore) return;
     setLoadingMore(true);
@@ -1029,11 +1050,16 @@ export default function App() {
                       {items.length} affichés sur {total}
                     </span>
                     {items.length < total && (
-                      <button onClick={loadMore} disabled={loadingMore}>
-                        {loadingMore
-                          ? "Chargement…"
-                          : `Afficher ${Math.min(PAGE_SIZE, total - items.length)} de plus`}
-                      </button>
+                      <>
+                        <button onClick={loadMore} disabled={loadingMore}>
+                          {loadingMore
+                            ? "Chargement…"
+                            : `Afficher ${Math.min(PAGE_SIZE, total - items.length)} de plus`}
+                        </button>
+                        <button onClick={loadAll} disabled={loadingMore}>
+                          Tout afficher ({total})
+                        </button>
+                      </>
                     )}
                   </div>
                 )}
@@ -1077,11 +1103,16 @@ export default function App() {
                       {items.length} affichés sur {total}
                     </span>
                     {items.length < total && (
-                      <button onClick={loadMore} disabled={loadingMore}>
-                        {loadingMore
-                          ? "Chargement…"
-                          : `Afficher ${Math.min(PAGE_SIZE, total - items.length)} de plus`}
-                      </button>
+                      <>
+                        <button onClick={loadMore} disabled={loadingMore}>
+                          {loadingMore
+                            ? "Chargement…"
+                            : `Afficher ${Math.min(PAGE_SIZE, total - items.length)} de plus`}
+                        </button>
+                        <button onClick={loadAll} disabled={loadingMore}>
+                          Tout afficher ({total})
+                        </button>
+                      </>
                     )}
                   </div>
                 )}
@@ -1160,11 +1191,16 @@ export default function App() {
                       {items.length} affichés sur {total}
                     </span>
                     {items.length < total && (
-                      <button onClick={loadMore} disabled={loadingMore}>
-                        {loadingMore
-                          ? "Chargement…"
-                          : `Afficher ${Math.min(PAGE_SIZE, total - items.length)} de plus`}
-                      </button>
+                      <>
+                        <button onClick={loadMore} disabled={loadingMore}>
+                          {loadingMore
+                            ? "Chargement…"
+                            : `Afficher ${Math.min(PAGE_SIZE, total - items.length)} de plus`}
+                        </button>
+                        <button onClick={loadAll} disabled={loadingMore}>
+                          Tout afficher ({total})
+                        </button>
+                      </>
                     )}
                   </div>
                 )}
