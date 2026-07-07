@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { confirm, open } from "@tauri-apps/plugin-dialog";
+import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import {
   api,
   Candidate,
@@ -765,6 +765,33 @@ export default function App() {
                   }}
                 >
                   Importer CSV
+                </button>
+              )}
+              {!mobile && (
+                <button
+                  title="Exporte la liste affichée (recherche et filtres appliqués)"
+                  onClick={async () => {
+                    if (!current) return;
+                    const filtered =
+                      query.trim() !== "" || Object.values(filters).some((v) => v !== undefined);
+                    const dest = await save({
+                      title: "Exporter la collection",
+                      defaultPath: `${current}${filtered ? "-filtre" : ""}.csv`,
+                      filters: [
+                        { name: "CSV", extensions: ["csv"] },
+                        { name: "JSON", extensions: ["json"] },
+                      ],
+                    });
+                    if (!dest) return;
+                    try {
+                      const n = await api.exportCollection(current, dest, query, filters);
+                      setNotice(`${n} objets exportés vers ${dest.split("/").pop()}`);
+                    } catch (e) {
+                      setError(String(e));
+                    }
+                  }}
+                >
+                  Exporter…
                 </button>
               )}
               {!mobile && schema.source && (

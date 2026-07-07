@@ -1,5 +1,6 @@
 mod defaults;
 mod enrich;
+mod export;
 mod hydrate;
 mod import;
 mod index;
@@ -740,6 +741,28 @@ fn import_csv(
     Ok(report)
 }
 
+/// Exporte la collection (filtres appliqués) en CSV ou JSON selon
+/// l'extension du fichier choisi.
+#[tauri::command]
+fn export_collection(
+    state: SharedState,
+    collection: String,
+    path: String,
+    query: Option<String>,
+    filters: Option<index::SearchFilters>,
+) -> Result<u64, String> {
+    with_state(&state, |lib, idx| {
+        export::export(
+            lib,
+            idx,
+            &collection,
+            std::path::Path::new(&path),
+            query.as_deref().unwrap_or(""),
+            &filters.unwrap_or_default(),
+        )
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Commandes : étiquettes à faire
 // ---------------------------------------------------------------------------
@@ -861,6 +884,7 @@ pub fn run() {
             enrich_start,
             enrich_status,
             enrich_cancel,
+            export_collection,
             labels_todo,
             labels_count,
             mark_labeled,

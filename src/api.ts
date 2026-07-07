@@ -283,6 +283,13 @@ export const api = {
   enrichStatus: () => invoke<EnrichProgress>("enrich_status"),
   enrichCancel: () => invoke<void>("enrich_cancel"),
 
+  exportCollection: (
+    collection: string,
+    path: string,
+    query: string,
+    filters: SearchFilters,
+  ) => invoke<number>("export_collection", { collection, path, query, filters }),
+
   labelsTodo: (collection?: string) =>
     invoke<IndexedItem[]>("labels_todo", { collection: collection ?? null }),
   labelsCount: () => invoke<number>("labels_count"),
