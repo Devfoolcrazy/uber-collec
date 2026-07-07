@@ -64,6 +64,16 @@ export default function App() {
   const [viewMode, setViewMode] = useState<"list" | "grid">(
     () => (localStorage.getItem("viewMode") as "list" | "grid") ?? "list",
   );
+  const [theme, setTheme] = useState<"auto" | "light" | "dark">(
+    () => (localStorage.getItem("theme") as "auto" | "light" | "dark") ?? "auto",
+  );
+
+  // Thème : « auto » suit macOS ; « clair »/« sombre » forcent via data-theme.
+  useEffect(() => {
+    if (theme === "auto") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
+    localStorage.setItem("theme", theme);
+  }, [theme]);
   const [showDashboard, setShowDashboard] = useState(false);
   const [showLabels, setShowLabels] = useState(false);
   const [labelsCount, setLabelsCount] = useState(0);
@@ -563,6 +573,15 @@ export default function App() {
           )}
         </div>
         <footer className="sidebar-footer">
+          <button
+            className="ghost theme-switch"
+            title="Thème d'affichage"
+            onClick={() =>
+              setTheme((t) => (t === "auto" ? "dark" : t === "dark" ? "light" : "auto"))
+            }
+          >
+            {theme === "auto" ? "◐ Thème auto" : theme === "dark" ? "🌙 Sombre" : "☀️ Clair"}
+          </button>
           <span title={libraryPath}>{mobile ? "lecture seule" : libraryPath.split("/").pop()}</span>
           <button
             hidden={mobile}
