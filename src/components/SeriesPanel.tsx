@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { api, Schema, SerieReport } from "../api";
 
 interface Props {
@@ -93,8 +93,32 @@ export default function SeriesPanel({
     }
   }
 
-  const shown = incompleteOnly ? report.filter((s) => s.manquants.length > 0) : report;
   const incompletes = report.filter((s) => s.manquants.length > 0).length;
+  // Incomplètes d'abord (l'action), puis le reste — alphabétique dans chaque
+  // groupe (l'API renvoie déjà trié par nom).
+  const sorted = [
+    ...report.filter((s) => s.manquants.length > 0),
+    ...report.filter((s) => s.manquants.length === 0),
+  ];
+  const shown = incompleteOnly ? sorted.filter((s) => s.manquants.length > 0) : sorted;
+  const firstCompleteIndex = shown.findIndex((s) => s.manquants.length === 0);
+
+  /** Barre de progression : possédés / plus grand tome connu. */
+  function Progress({ s }: { s: SerieReport }) {
+    const max = Math.max(s.possedes[s.possedes.length - 1] ?? 0, s.possedes.length);
+    if (max === 0) return <span className="muted">—</span>;
+    const pct = Math.round((s.possedes.length / max) * 100);
+    return (
+      <span className="progress-cell">
+        <span className="progress-track">
+          <span className="progress-fill" style={{ width: `${pct}%` }} />
+        </span>
+        <span className="progress-text mono">
+          {s.possedes.length}/{max}
+        </span>
+      </span>
+    );
+  }
 
   return (
     <div className="series-panel">
@@ -118,14 +142,21 @@ export default function SeriesPanel({
         <thead>
           <tr>
             <th>Série</th>
-            <th>Possédés</th>
+            <th className="col-progress">Progression</th>
+            <th className="col-tomes">Tomes</th>
             <th>Manquants</th>
             <th className="col-terminee">Terminée</th>
           </tr>
         </thead>
         <tbody>
-          {shown.map((s) => (
-            <tr key={s.id}>
+          {shown.map((s, i) => (
+            <React.Fragment key={s.id}>
+              {i === firstCompleteIndex && i > 0 && (
+                <tr className="series-divider">
+                  <td colSpan={5}>complètes</td>
+                </tr>
+              )}
+            <tr className={s.manquants.length === 0 ? "serie-complete" : ""}>
               <td>
                 <button
                   className="serie-link"
@@ -133,13 +164,17 @@ export default function SeriesPanel({
                   onClick={() => onOpenSerie(s.id)}
                 >
                   {s.nom}
-                </button>{" "}
-                <span className="muted">({s.possedes.length})</span>
+                </button>
               </td>
-              <td className="mono">{ranges(s.possedes) || "—"}</td>
+              <td className="col-progress">
+                <Progress s={s} />
+              </td>
+              <td className="mono col-tomes">{ranges(s.possedes) || "—"}</td>
               <td>
-                {s.manquants.length === 0 ? (
-                  <span className="complete">✓ complète</span>
+                {s.possedes.length === 0 ? (
+                  <span className="muted">—</span>
+                ) : s.manquants.length === 0 ? (
+                  <span className="complete">✓</span>
                 ) : (
                   <span className="gap-chips">
                     {s.manquants.map((t) =>
@@ -185,6 +220,7 @@ export default function SeriesPanel({
                 />
               </td>
             </tr>
+            </React.Fragment>
           ))}
         </tbody>
       </table>
