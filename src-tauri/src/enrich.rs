@@ -88,13 +88,14 @@ async fn run_inner(app: &tauri::AppHandle, collection: &str) -> Result<(), Strin
     let progress = app.state::<SharedProgress>();
 
     // Photographie initiale : racine, schéma, liste des fiches.
-    let (root, schema, ids) = {
+    let (root, mut schema, ids) = {
         let guard = state.lock().unwrap();
         let lib = guard.library.as_ref().ok_or("aucune bibliothèque ouverte")?;
         let schema = lib.load_schema(collection)?;
         let ids = lib.list_item_ids(collection)?;
         (lib.root.clone(), schema, ids)
     };
+    let mut schema_dirty = false;
     let source = schema.source.clone().unwrap_or_default();
     let (tmdb_key, discogs_token) = crate::api_keys_from_config(app);
     if source == "dvd" && tmdb_key.is_none() {
@@ -271,6 +272,18 @@ async fn run_inner(app: &tauri::AppHandle, collection: &str) -> Result<(), Strin
             continue;
         }
 
+        // Genre inconnu proposé par une source (Discogs…) : ajouté au schéma
+        // avec un code unique, comme à l'import — sinon la cote reste AUTRE.
+        if genre_missing {
+            if let Some(genre) = candidates.iter().find_map(|c| c.genre.as_deref()) {
+                if let Some((_, _, added)) = hydrate::ensure_genre(&mut schema, genre) {
+                    if added {
+                        schema_dirty = true;
+                    }
+                }
+            }
+        }
+
         // Fusionne les champs de tous les candidats validés : premier
         // non-vide gagnant (MusicBrainz d'abord, puis Discogs).
         let mut changed = false;
@@ -335,6 +348,14 @@ async fn run_inner(app: &tauri::AppHandle, collection: &str) -> Result<(), Strin
         }
         if got_cover {
             p.covers += 1;
+        }
+    }
+
+    // Genres ajoutés en cours de route : le schéma enrichi est persisté.
+    if schema_dirty {
+        let guard = state.lock().unwrap();
+        if let Some(lib) = &guard.library {
+            lib.save_schema(collection, &schema)?;
         }
     }
     Ok(())

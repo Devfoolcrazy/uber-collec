@@ -412,7 +412,9 @@ export default function App() {
   async function pickForCreate(candidate: Candidate) {
     if (!current) return;
     try {
-      setDraftFields(await api.candidateFields(current, candidate));
+      setDraftFields(await api.candidateFields(current, candidate, true));
+      // Le schéma a pu gagner un genre : le formulaire doit le proposer.
+      api.getSchema(current).then(setSchema).catch(() => {});
       setDraftCoverUrl(candidate.cover_url);
       setEditing(null);
       setShowForm(true);
@@ -425,7 +427,8 @@ export default function App() {
   async function pickForEnrich(candidate: Candidate) {
     if (!current || !viewing) return;
     try {
-      const fields = await api.candidateFields(current, candidate);
+      const fields = await api.candidateFields(current, candidate, true);
+      api.getSchema(current).then(setSchema).catch(() => {});
       const { id, cote: _c, statut, emplacement, date_ajout: _d, ...rest } = viewing;
       const merged: FieldValues = { ...rest };
       const added: string[] = [];

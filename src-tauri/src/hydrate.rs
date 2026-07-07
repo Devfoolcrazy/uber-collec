@@ -869,6 +869,36 @@ fn find_target(schema: &Schema, wanted: &[&str]) -> Option<crate::model::FieldDe
     None
 }
 
+/// Rapproche un genre proposé des options du champ genre du schéma ; s'il
+/// est inconnu, l'ajoute avec un code de cote unique dérivé (même politique
+/// que l'import CSV). Renvoie (clé du champ, valeur canonique, ajouté ?).
+pub(crate) fn ensure_genre(
+    schema: &mut Schema,
+    genre: &str,
+) -> Option<(String, String, bool)> {
+    let key = find_target(schema, &["genre", "style"])?.key;
+    let def = schema.fields.iter_mut().find(|f| f.key == key)?;
+    if def.field_type != crate::model::FieldType::Select {
+        return None;
+    }
+    if let Some(option) = def.options.iter().find(|o| same_thing(&o.value, genre)) {
+        return Some((key, option.value.clone(), false));
+    }
+    let taken: std::collections::BTreeSet<String> =
+        def.options.iter().map(|o| o.effective_code()).collect();
+    let mut code = crate::model::derive_code(genre);
+    let mut n = 2;
+    while taken.contains(&code) {
+        code = format!("{}{n}", crate::model::derive_code(genre));
+        n += 1;
+    }
+    def.options.push(crate::model::SelectOption {
+        value: genre.to_string(),
+        code: Some(code),
+    });
+    Some((key, genre.to_string(), true))
+}
+
 /// Liste de noms → valeur adaptée au type du champ cible (liste, ou texte
 /// joint par « ; » si le champ est un simple texte).
 fn names_value(field: &crate::model::FieldDef, names: &[String]) -> serde_json::Value {
@@ -1010,6 +1040,31 @@ mod tests {
         assert_eq!(
             clean_bnf_name("Tolkien, John Ronald Reuel (1892-1973). Auteur du texte"),
             "John Ronald Reuel Tolkien"
+        );
+    }
+
+    #[test]
+    fn ensure_genre_matches_or_appends_with_unique_code() {
+        let mut schema: Schema =
+            serde_yaml::from_str(crate::defaults::DEFAULT_SCHEMAS.iter().find(|(s, _)| *s == "cd").unwrap().1)
+                .unwrap();
+        // Variante d'accent/graphie → option canonique, rien d'ajouté.
+        let (key, value, added) = ensure_genre(&mut schema, "Electro").unwrap();
+        assert_eq!((key.as_str(), value.as_str(), added), ("genre", "Électro", false));
+
+        // Genre inconnu → ajouté avec code dérivé.
+        let (_, value, added) = ensure_genre(&mut schema, "Italo-Disco").unwrap();
+        assert!(added);
+        assert_eq!(value, "Italo-Disco");
+        let genre = schema.field("genre").unwrap();
+        assert!(genre.options.iter().any(|o| o.value == "Italo-Disco"));
+
+        // Redemander le même → rapproché, pas de doublon.
+        let (_, _, added) = ensure_genre(&mut schema, "italo disco").unwrap();
+        assert!(!added);
+        assert_eq!(
+            genre.options.len() + 1,
+            schema.field("genre").unwrap().options.len() + 1
         );
     }
 

@@ -254,8 +254,8 @@ export const api = {
       collection,
       query,
     }),
-  candidateFields: (collection: string, candidate: Candidate) =>
-    invoke<FieldValues>("candidate_fields", { collection, candidate }),
+  candidateFields: (collection: string, candidate: Candidate, addGenres = false) =>
+    invoke<FieldValues>("candidate_fields", { collection, candidate, addGenres }),
   downloadCover: (collection: string, id: string, url: string) =>
     invoke<string>("download_cover", { collection, id, url }),
   setCoverFromFile: (collection: string, id: string, path: string) =>

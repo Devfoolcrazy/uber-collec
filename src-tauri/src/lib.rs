@@ -558,15 +558,29 @@ fn api_keys_status(app: AppHandle) -> Result<ApiKeysStatus, String> {
     })
 }
 
+/// Mapping candidat → champs. `add_genres` (flux d'application uniquement,
+/// jamais la prévisualisation) : un genre inconnu est ajouté au schéma.
 #[tauri::command]
 fn candidate_fields(
     state: SharedState,
     collection: String,
     candidate: hydrate::Candidate,
+    add_genres: Option<bool>,
 ) -> Result<BTreeMap<String, serde_json::Value>, String> {
     with_state(&state, |lib, _| {
-        let schema = lib.load_schema(&collection)?;
-        Ok(hydrate::candidate_to_fields(&schema, &candidate))
+        let mut schema = lib.load_schema(&collection)?;
+        let mut fields = hydrate::candidate_to_fields(&schema, &candidate);
+        if add_genres.unwrap_or(false) {
+            if let Some(genre) = &candidate.genre {
+                if let Some((key, value, added)) = hydrate::ensure_genre(&mut schema, genre) {
+                    fields.insert(key, serde_json::json!(value));
+                    if added {
+                        lib.save_schema(&collection, &schema)?;
+                    }
+                }
+            }
+        }
+        Ok(fields)
     })
 }
 
