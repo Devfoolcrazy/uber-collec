@@ -1586,3 +1586,19 @@ tr.serie-complete .progress-fill {
   min-width: 36px;
   text-align: right;
 }
+
+.app-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.refresh-all {
+  font-size: 15px;
+  padding: 2px 8px;
+  color: var(--muted);
+}
+
+.refresh-all:hover {
+  color: var(--accent);
+}

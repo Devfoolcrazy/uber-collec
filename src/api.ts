@@ -123,9 +123,18 @@ export interface Candidate {
   score: number | null;
 }
 
+/** Version de cache des couvertures : incrémentée au refresh manuel pour
+ *  forcer le rechargement d'images remplacées sous le même nom de fichier. */
+let coverVersion = 0;
+
+export function bumpCoverVersion(): void {
+  coverVersion += 1;
+}
+
 /** URL affichable d'une couverture stockée dans la bibliothèque. */
 export function coverSrc(libraryPath: string, rel: string): string {
-  return convertFileSrc(`${libraryPath}/${rel}`);
+  const url = convertFileSrc(`${libraryPath}/${rel}`);
+  return coverVersion > 0 ? `${url}?v=${coverVersion}` : url;
 }
 
 export interface SyncStatus {

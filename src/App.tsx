@@ -14,7 +14,7 @@ import {
   Series,
   Statut,
 } from "./api";
-import { coverSrc } from "./api";
+import { bumpCoverVersion, coverSrc } from "./api";
 import ItemForm from "./components/ItemForm";
 import ItemView from "./components/ItemView";
 import ImportWizard from "./components/ImportWizard";
@@ -369,6 +369,43 @@ export default function App() {
     }
   }
 
+  /** Refresh manuel (bouton ↻ / ⌘R) : reconstruit l'index depuis les
+   *  fichiers et recharge tout — pour les modifications faites hors app. */
+  const refreshAll = useCallback(async () => {
+    if (!libraryPath) return;
+    try {
+      setNotice("Reconstruction de l'index…");
+      const n = await api.rebuildIndex();
+      bumpCoverVersion();
+      const cols = await refreshCollections();
+      if (current) {
+        api.getSchema(current).then(setSchema).catch(() => {});
+        api.listYears(current).then(setYears).catch(() => {});
+        api.listSeries(current).then(setSeriesList).catch(() => {});
+      } else if (cols.length > 0) {
+        setCurrent(cols[0].slug);
+      }
+      await refreshItems();
+      await refreshSync();
+      setNotice(`Rechargé depuis les fichiers : ${n} objets indexés`);
+    } catch (e) {
+      setError(String(e));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libraryPath, current, refreshCollections, refreshItems, refreshSync]);
+
+  // ⌘R = refresh complet (au lieu du rechargement de page de la webview).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        void refreshAll();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [refreshAll]);
+
   async function afterChange() {
     setShowForm(false);
     setEditing(null);
@@ -504,7 +541,18 @@ export default function App() {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <h1>Uber Collec</h1>
+        <h1 className="app-title">
+          Uber Collec
+          {!mobile && (
+            <button
+              className="ghost refresh-all"
+              title="Recharger depuis les fichiers — reconstruit l'index (⌘R)"
+              onClick={() => refreshAll()}
+            >
+              ↻
+            </button>
+          )}
+        </h1>
         <nav>
           <button
             className={showDashboard ? "nav-item active" : "nav-item"}
