@@ -26,3 +26,6 @@ dist-ssr
 # Bibliothèque de données personnelle (dépôt Git séparé — jamais publiée ici)
 collections_test/
 *.sqlite
+
+# Données scrapées locales (une passe d'import ponctuelle)
+data_ldvelh/

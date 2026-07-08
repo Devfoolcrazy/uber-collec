@@ -514,6 +514,233 @@ mod tests {
         assert!(err.contains("Inexistante"), "{err}");
     }
 
+    /// Import unique du scrape LDVELH (books.json + books_new.json + covers).
+    /// Tout en wishlist ; les fiches existantes (rapprochées par ISBN ou
+    /// titre normalisé) sont enrichies sans changer leur statut.
+    /// `REAL_LIB=… LDVELH_DATA=… cargo test import_ldvelh -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn import_ldvelh_scrape() {
+        use crate::model::{Series, Statut};
+        use serde_json::json;
+
+        let root = std::env::var("REAL_LIB").expect("REAL_LIB non défini");
+        let data = std::path::PathBuf::from(std::env::var("LDVELH_DATA").expect("LDVELH_DATA"));
+        let lib = Library::open(&root).unwrap();
+        let coll = "ldvelh";
+        let schema = lib.load_schema(coll).unwrap();
+
+        let old: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(data.join("books.json")).unwrap())
+                .unwrap();
+        let new: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(data.join("books_new.json")).unwrap())
+                .unwrap();
+
+        // Registre des séries depuis la collection d'origine.
+        let mut series = lib.load_series(coll).unwrap();
+        for b in &old {
+            let nom = b["serie"].as_str().unwrap().trim();
+            let id = slugify(nom);
+            if !series.iter().any(|s| s.id == id) {
+                series.push(Series { id, nom: nom.to_string(), terminee: false });
+            }
+        }
+        lib.save_series(coll, &series).unwrap();
+
+        // Rapprochement NEW → OLD par titre normalisé (série + numéro).
+        let old_by_titre: std::collections::HashMap<String, &serde_json::Value> =
+            old.iter().map(|b| (normalize(b["titre"].as_str().unwrap()), b)).collect();
+
+        // Existants : par ISBN, et par (titre normalisé + édition) — le même
+        // titre existe en version 1983 ET en réédition, il ne faut jamais
+        // les confondre.
+        let mut existing_isbn = std::collections::HashMap::new();
+        let mut existing_titre = std::collections::HashMap::new();
+        for id in lib.list_item_ids(coll).unwrap() {
+            let item = lib.load_item(coll, &id).unwrap();
+            if let Some(i) = item.fields.get("isbn").and_then(|v| v.as_str()) {
+                existing_isbn.insert(i.to_string(), id.clone());
+            }
+            let edition = item
+                .fields
+                .get("edition")
+                .or_else(|| item.fields.get("serie")) // clé v1 : serie = OLD/NEW
+                .and_then(|v| v.as_str())
+                .unwrap_or("NEW")
+                .to_string();
+            if let Some(t) = item.fields.get("titre").and_then(|v| v.as_str()) {
+                existing_titre.insert((normalize(t), edition), id.clone());
+            }
+        }
+
+        let opt_str = |v: &serde_json::Value| v.as_str().map(str::to_string);
+        let str_list = |v: &serde_json::Value| -> Vec<String> {
+            v.as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                .unwrap_or_default()
+        };
+
+        let mut created = 0;
+        let mut enriched = 0;
+        let mut covers = 0;
+
+        // (livre, edition, dossier covers, série héritée)
+        let entries = old
+            .iter()
+            .map(|b| (b, "OLD", "covers", Some(b)))
+            .chain(new.iter().map(|b| {
+                let inherited = b["titre"]
+                    .as_str()
+                    .and_then(|t| old_by_titre.get(&normalize(t)).copied());
+                (b, "NEW", "covers_new", inherited)
+            }));
+
+        for (book, edition, covers_dir, serie_src) in entries {
+            let isbn = book["isbn13"].as_str().unwrap().to_string();
+            let titre = book["titre"].as_str().unwrap().trim().to_string();
+
+            let mut fields: std::collections::BTreeMap<String, serde_json::Value> =
+                std::collections::BTreeMap::new();
+            fields.insert("titre".into(), json!(titre));
+            fields.insert("edition".into(), json!(edition));
+            fields.insert("isbn".into(), json!(isbn));
+            if let Some(src) = serie_src {
+                let nom = src["serie"].as_str().unwrap_or_default();
+                if !nom.is_empty() {
+                    let mut obj = json!({ "id": slugify(nom) });
+                    if let Some(t) = src["numero_serie"].as_i64() {
+                        obj["tome"] = json!(t);
+                    }
+                    fields.insert("serie".into(), obj);
+                }
+            }
+            let auteurs = str_list(&book["auteurs"]);
+            if !auteurs.is_empty() {
+                fields.insert("auteurs".into(), json!(auteurs));
+            }
+            let illustrateurs = str_list(&book["illustrateurs"]);
+            if !illustrateurs.is_empty() {
+                fields.insert("illustrateurs".into(), json!(illustrateurs));
+            }
+            if let Some(e) = opt_str(&book["editeur"]) {
+                fields.insert("editeur".into(), json!(e));
+            }
+            if let Some(d) = book["annee"]
+                .as_i64()
+                .map(|y| y.to_string())
+                .or_else(|| opt_str(&book["date_parution"]))
+            {
+                fields.insert("date_parution".into(), json!(d));
+            }
+            if let Some(n) = book["note_moyenne"].as_f64() {
+                fields.insert("note".into(), json!(n));
+            }
+            if let Some(r) = opt_str(&book["rarete"]) {
+                fields.insert("rarete".into(), json!(r));
+            }
+            if let Some(s) = opt_str(&book["description"]) {
+                fields.insert("synopsis".into(), json!(s));
+            }
+            if let Some(u) = opt_str(&book["url"]) {
+                fields.insert("url".into(), json!(u));
+            }
+
+            // Existant (son « possédé » reste possédé) → complète les vides
+            // et migre les anciennes clés ; sinon création en wishlist.
+            let existing_id = existing_isbn
+                .get(&isbn)
+                .or_else(|| existing_titre.get(&(normalize(&titre), edition.to_string())))
+                .cloned();
+            let id = match existing_id {
+                Some(id) => {
+                    let mut item = lib.load_item(coll, &id).unwrap();
+                    // Migration des clés v1 : serie(OLD/NEW)→edition,
+                    // collection+tome→serie ref, auteurs texte→liste.
+                    if let Some(serde_json::Value::String(v)) = item.fields.get("serie").cloned() {
+                        item.fields.remove("serie");
+                        item.fields.entry("edition".into()).or_insert(json!(v));
+                    }
+                    if let Some(c) = item.fields.remove("collection") {
+                        if let Some(nom) = c.as_str() {
+                            let mut obj = json!({ "id": slugify(nom) });
+                            if let Some(t) = item.fields.remove("tome").and_then(|v| v.as_i64()) {
+                                obj["tome"] = json!(t);
+                            }
+                            item.fields.insert("serie".into(), obj);
+                        }
+                    }
+                    if let Some(serde_json::Value::String(a)) = item.fields.get("auteurs").cloned()
+                    {
+                        let list: Vec<String> =
+                            a.split(';').map(|s| s.trim().to_string()).collect();
+                        item.fields.insert("auteurs".into(), json!(list));
+                    }
+                    for (k, v) in &fields {
+                        let empty = match item.fields.get(k) {
+                            None | Some(serde_json::Value::Null) => true,
+                            Some(serde_json::Value::String(s)) => s.trim().is_empty(),
+                            Some(serde_json::Value::Array(a)) => a.is_empty(),
+                            _ => false,
+                        };
+                        if empty {
+                            item.fields.insert(k.clone(), v.clone());
+                        }
+                    }
+                    lib.save_item(coll, &item).unwrap();
+                    enriched += 1;
+                    id
+                }
+                None => {
+                    let item = lib.create_item(coll, Statut::Souhaite, fields).unwrap();
+                    created += 1;
+                    item.id
+                }
+            };
+
+            // Couverture : copie (déjà WebP) ou conversion.
+            let mut item = lib.load_item(coll, &id).unwrap();
+            let has_cover = item
+                .fields
+                .get("image")
+                .and_then(|v| v.as_str())
+                .map(|s| !s.is_empty())
+                .unwrap_or(false);
+            if !has_cover {
+                let src_webp = data.join(covers_dir).join(format!("{isbn}.webp"));
+                let src_jpg = data.join(covers_dir).join(format!("{isbn}.jpg"));
+                let rel = format!("images/{coll}/{id}.webp");
+                let dest = std::path::Path::new(&root).join(&rel);
+                let written = if src_webp.exists() {
+                    std::fs::copy(&src_webp, &dest).is_ok()
+                } else if src_jpg.exists() {
+                    std::fs::read(&src_jpg)
+                        .ok()
+                        .and_then(|bytes| crate::hydrate::to_webp(&bytes, 400).ok())
+                        .map(|webp| std::fs::write(&dest, webp).is_ok())
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+                if written {
+                    item.fields.insert("image".into(), json!(rel));
+                    lib.save_item(coll, &item).unwrap();
+                    covers += 1;
+                }
+            }
+        }
+
+        // Cotes : la config vient d'arriver (année + édition) — l'existant
+        // possédé reçoit sa vraie cote.
+        let regen = lib.regenerate_stale_cotes(coll).unwrap();
+        let _ = schema;
+        println!(
+            "créés (wishlist): {created} · existants enrichis: {enriched} · couvertures: {covers} · séries: {} · cotes régénérées: {}",
+            series.len(),
+            regen.len()
+        );
+    }
+
     /// Import réel : REAL_LIB + REAL_CSV définis.
     /// `REAL_LIB=… REAL_CSV=… cargo test real_import -- --ignored --nocapture`
     #[test]
