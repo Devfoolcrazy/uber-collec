@@ -940,7 +940,7 @@ export default function App() {
                   )}
                   {genreField && (
                     <select value={genreFilter} onChange={(e) => setGenreFilter(e.target.value)}>
-                      <option value="">Tous les genres</option>
+                      <option value="">{genreField.label} : tout</option>
                       {(genreField.options ?? []).map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.value}
