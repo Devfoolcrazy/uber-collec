@@ -76,8 +76,8 @@ pub fn sources_catalog() -> Vec<SourceInfo> {
         },
         SourceInfo {
             id: "dvd",
-            label: "Films — TMDB",
-            description: "Recherche par titre uniquement (pas de code-barres). Affiches, synopsis, réalisateur, acteurs, genre.",
+            label: "Films & séries TV — TMDB",
+            description: "Recherche par titre uniquement (pas de code-barres). Films et séries TV : affiches, synopsis, réalisateur, acteurs, genre.",
             requires_key: Some("tmdb"),
             fills: &["titre", "realisateur", "acteurs", "genre", "date_sortie", "synopsis"],
         },
@@ -491,7 +491,7 @@ pub(crate) async fn discogs_strict(
 // TMDB (DVD / Blu-ray) — recherche par titre, affiches, langue française
 // ---------------------------------------------------------------------------
 
-/// Genres TMDB (identifiants stables) → libellés français.
+/// Genres TMDB (identifiants stables, films et séries TV) → libellés français.
 fn tmdb_genre(id: i64) -> Option<&'static str> {
     Some(match id {
         28 => "Action",
@@ -504,6 +504,10 @@ fn tmdb_genre(id: i64) -> Option<&'static str> {
         27 => "Horreur",
         878 => "Science-Fiction",
         53 => "Thriller",
+        // Taxonomie séries TV
+        10759 => "Aventure",        // Action & Adventure
+        10765 => "Science-Fiction", // Sci-Fi & Fantasy
+        10762 => "Animation",       // Kids
         _ => return None,
     })
 }
@@ -538,10 +542,11 @@ pub(crate) async fn tmdb(
     key: &str,
     query: &str,
 ) -> Result<Vec<Candidate>, String> {
+    // Recherche mixte : films ET séries TV (coffrets DVD de séries).
     let resp = tmdb_get(
         client,
         key,
-        "search/movie",
+        "search/multi",
         &[("query", query), ("language", "fr-FR"), ("include_adult", "false")],
     )
     .await?;
@@ -549,11 +554,22 @@ pub(crate) async fn tmdb(
     let results = resp["results"].as_array().unwrap_or(&empty);
 
     let mut out = Vec::new();
-    // Réalisateur/acteurs demandent un appel crédits par film : top 5.
-    for movie in results.iter().take(5) {
-        let Some(titre) = s(&movie["title"]) else { continue };
-        let id = movie["id"].as_i64().unwrap_or(0);
-        let credits = tmdb_get(client, key, &format!("movie/{id}/credits"), &[])
+    // Réalisateur/acteurs demandent un appel crédits par titre : top 5.
+    for entry in results
+        .iter()
+        .filter(|r| r["media_type"] == "movie" || r["media_type"] == "tv")
+        .take(5)
+    {
+        let is_tv = entry["media_type"] == "tv";
+        // Les séries utilisent name/first_air_date, les films title/release_date.
+        let Some(titre) = s(&entry["title"]).or_else(|| s(&entry["name"])) else { continue };
+        let id = entry["id"].as_i64().unwrap_or(0);
+        let credits_path = if is_tv {
+            format!("tv/{id}/credits")
+        } else {
+            format!("movie/{id}/credits")
+        };
+        let credits = tmdb_get(client, key, &credits_path, &[])
             .await
             .unwrap_or(serde_json::Value::Null);
         let realisateurs: Vec<String> = credits["crew"]
@@ -562,6 +578,7 @@ pub(crate) async fn tmdb(
                 crew.iter()
                     .filter(|m| m["job"] == "Director")
                     .filter_map(|m| s(&m["name"]))
+                    .take(3)
                     .collect()
             })
             .unwrap_or_default();
@@ -570,18 +587,18 @@ pub(crate) async fn tmdb(
             .map(|cast| cast.iter().take(4).filter_map(|m| s(&m["name"])).collect())
             .unwrap_or_default();
         out.push(Candidate {
-            source: "TMDB".into(),
+            source: if is_tv { "TMDB · série TV".into() } else { "TMDB".into() },
             titre: Some(titre),
             auteurs: realisateurs,
             illustrateurs: Vec::new(),
             editeur: None,
-            date_parution: s(&movie["release_date"]),
+            date_parution: s(&entry["release_date"]).or_else(|| s(&entry["first_air_date"])),
             ean: None,
-            synopsis: s(&movie["overview"]),
-            cover_url: s(&movie["poster_path"])
+            synopsis: s(&entry["overview"]),
+            cover_url: s(&entry["poster_path"])
                 .map(|p| format!("https://image.tmdb.org/t/p/w500{p}")),
-            score: movie["vote_count"].as_i64(),
-            genre: movie["genre_ids"]
+            score: entry["vote_count"].as_i64(),
+            genre: entry["genre_ids"]
                 .as_array()
                 .and_then(|ids| ids.iter().filter_map(|i| i.as_i64()).find_map(tmdb_genre))
                 .map(str::to_string),
@@ -1322,6 +1339,16 @@ mod tests {
             .await
             .unwrap();
         assert!(!strict.is_empty(), "le film de 1997 doit passer le filtre strict");
+
+        // Les séries TV doivent remonter aussi (coffrets DVD).
+        let series = tmdb(&client, &key, "Kaamelott").await.unwrap();
+        for c in series.iter().take(3) {
+            println!("  [{}] {:?} ({:?}) genre={:?}", c.source, c.titre, c.date_parution, c.genre);
+        }
+        assert!(
+            series.iter().any(|c| c.source.contains("série TV")),
+            "Kaamelott doit remonter comme série TV"
+        );
     }
 
     /// Test réseau réel iTunes : `cargo test itunes_live -- --ignored --nocapture`
