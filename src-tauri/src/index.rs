@@ -20,6 +20,11 @@ pub struct SearchFilters {
     pub annee: Option<i64>,
     /// Identifiant de série (slug du registre).
     pub serie: Option<String>,
+    /// Filtres sur n'importe quel champ `select` du schéma (clé → valeur
+    /// choisie). Le champ genre de la cote a sa colonne indexée dédiée ;
+    /// tout autre sélecteur est lu dans le JSON de la fiche.
+    #[serde(default)]
+    pub selects: std::collections::BTreeMap<String, String>,
 }
 
 pub struct Index {
@@ -326,24 +331,36 @@ impl Index {
     /// Clauses SQL et paramètres nommés correspondant aux filtres.
     fn filter_clauses(
         filters: &SearchFilters,
-    ) -> (String, Vec<(&'static str, Box<dyn rusqlite::ToSql>)>) {
+    ) -> (String, Vec<(String, Box<dyn rusqlite::ToSql>)>) {
         let mut clauses = String::new();
-        let mut params: Vec<(&'static str, Box<dyn rusqlite::ToSql>)> = Vec::new();
+        let mut params: Vec<(String, Box<dyn rusqlite::ToSql>)> = Vec::new();
         if let Some(s) = &filters.statut {
             clauses.push_str(" AND i.statut = :statut");
-            params.push((":statut", Box::new(s.clone())));
+            params.push((":statut".to_string(), Box::new(s.clone())));
         }
         if let Some(g) = &filters.genre {
             clauses.push_str(" AND i.genre = :genre");
-            params.push((":genre", Box::new(g.clone())));
+            params.push((":genre".to_string(), Box::new(g.clone())));
         }
         if let Some(a) = filters.annee {
             clauses.push_str(" AND i.annee = :annee");
-            params.push((":annee", Box::new(a)));
+            params.push((":annee".to_string(), Box::new(a)));
         }
         if let Some(s) = &filters.serie {
             clauses.push_str(" AND i.serie_id = :serie");
-            params.push((":serie", Box::new(s.clone())));
+            params.push((":serie".to_string(), Box::new(s.clone())));
+        }
+        // Sélecteurs du schéma sans colonne dédiée : lus dans le JSON de la
+        // fiche. Chemin et valeur sont des paramètres liés — aucune injection.
+        for (i, (key, value)) in filters.selects.iter().enumerate() {
+            let path_param = format!(":selp{i}");
+            let value_param = format!(":selv{i}");
+            clauses.push_str(&format!(
+                " AND json_extract(i.data, {path_param}) = {value_param}"
+            ));
+            let path = format!("$.\"{}\"", key.replace('"', ""));
+            params.push((path_param, Box::new(path)));
+            params.push((value_param, Box::new(value.clone())));
         }
         (clauses, params)
     }
@@ -367,12 +384,12 @@ impl Index {
             )
         };
         let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
-        params.push((":collection", Box::new(collection.to_string())));
+        params.push((":collection".to_string(), Box::new(collection.to_string())));
         if !query.is_empty() {
-            params.push((":match", Box::new(Self::fts_query(query))));
+            params.push((":match".to_string(), Box::new(Self::fts_query(query))));
         }
         let params_ref: Vec<(&str, &dyn rusqlite::ToSql)> =
-            params.iter().map(|(k, v)| (*k, v.as_ref() as &dyn rusqlite::ToSql)).collect();
+            params.iter().map(|(k, v)| (k.as_str(), v.as_ref() as &dyn rusqlite::ToSql)).collect();
         stmt.query_row(params_ref.as_slice(), |r| r.get(0))
             .map_err(|e| e.to_string())
     }
@@ -613,14 +630,14 @@ impl Index {
             )
         };
         let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
-        params.push((":collection", Box::new(collection.to_string())));
-        params.push((":limit", Box::new(limit)));
-        params.push((":offset", Box::new(offset)));
+        params.push((":collection".to_string(), Box::new(collection.to_string())));
+        params.push((":limit".to_string(), Box::new(limit)));
+        params.push((":offset".to_string(), Box::new(offset)));
         if !query.is_empty() {
-            params.push((":match", Box::new(Self::fts_query(query))));
+            params.push((":match".to_string(), Box::new(Self::fts_query(query))));
         }
         let params_ref: Vec<(&str, &dyn rusqlite::ToSql)> =
-            params.iter().map(|(k, v)| (*k, v.as_ref() as &dyn rusqlite::ToSql)).collect();
+            params.iter().map(|(k, v)| (k.as_str(), v.as_ref() as &dyn rusqlite::ToSql)).collect();
         let rows = stmt
             .query_map(params_ref.as_slice(), |row| {
                 Ok(IndexedItem {
@@ -779,6 +796,45 @@ mod tests {
         assert_ne!(desc[0].titre, "Universal War One");
         // Clé de tri inconnue → pas d'injection, ordre par défaut.
         assert!(index.search("bd", "", &all, Some("evil; DROP"), false, 50, 0).is_ok());
+    }
+
+    #[test]
+    fn select_field_filters() {
+        let (_dir, lib, mut index) = setup();
+        let mut fields = BTreeMap::new();
+        fields.insert("titre".to_string(), json!("Die Hard"));
+        fields.insert("genre".to_string(), json!("Science-Fiction"));
+        fields.insert("editeur".to_string(), json!("Dargaud"));
+        lib.create_item("bd", Statut::Possede, fields).unwrap();
+        let mut fields = BTreeMap::new();
+        fields.insert("titre".to_string(), json!("Stargate SG-1"));
+        fields.insert("genre".to_string(), json!("Science-Fiction"));
+        fields.insert("editeur".to_string(), json!("Glénat"));
+        lib.create_item("bd", Statut::Possede, fields).unwrap();
+        index.rebuild(&lib).unwrap();
+
+        // Filtre sur un champ sans colonne dédiée : lu dans le JSON.
+        let mut selects = std::collections::BTreeMap::new();
+        selects.insert("editeur".to_string(), "Glénat".to_string());
+        let f = SearchFilters { selects: selects.clone(), ..Default::default() };
+        let hits = index.search("bd", "", &f, None, false, 50, 0).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].titre, "Stargate SG-1");
+        assert_eq!(index.count_search("bd", "", &f).unwrap(), 1);
+
+        // Combinable avec les filtres à colonne dédiée et le plein texte.
+        let f = SearchFilters {
+            genre: Some("Science-Fiction".into()),
+            selects,
+            ..Default::default()
+        };
+        assert_eq!(index.search("bd", "stargate", &f, None, false, 50, 0).unwrap().len(), 1);
+
+        // Valeur absente → aucun résultat, pas d'erreur.
+        let mut selects = std::collections::BTreeMap::new();
+        selects.insert("inconnu".to_string(), "x".to_string());
+        let f = SearchFilters { selects, ..Default::default() };
+        assert!(index.search("bd", "", &f, None, false, 50, 0).unwrap().is_empty());
     }
 
     #[test]

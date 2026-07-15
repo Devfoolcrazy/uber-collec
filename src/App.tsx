@@ -48,6 +48,8 @@ export default function App() {
   const [genreFilter, setGenreFilter] = useState("");
   const [anneeFilter, setAnneeFilter] = useState("");
   const [serieFilter, setSerieFilter] = useState("");
+  // Filtres des autres champs `select` du schéma (Type, Édition…) : clé → valeur.
+  const [selectFilters, setSelectFilters] = useState<Record<string, string>>({});
   const [years, setYears] = useState<number[]>([]);
   const [seriesList, setSeriesList] = useState<Series[]>([]);
   const [editing, setEditing] = useState<Item | null>(null);
@@ -185,6 +187,7 @@ export default function App() {
     setGenreFilter("");
     setAnneeFilter("");
     setSerieFilter("");
+    setSelectFilters({});
     setSortKey(null);
     setSortDesc(false);
     setColTab(pendingTab.current ?? "objets");
@@ -195,11 +198,15 @@ export default function App() {
     api.listSeries(current).then(setSeriesList).catch(() => setSeriesList([]));
   }, [current]);
 
+  const activeSelects = Object.fromEntries(
+    Object.entries(selectFilters).filter(([, v]) => v !== ""),
+  );
   const filters: SearchFilters = {
     statut: statutFilter === "tous" ? undefined : statutFilter,
     genre: genreFilter || undefined,
     annee: anneeFilter ? Number(anneeFilter) : undefined,
     serie: serieFilter || undefined,
+    selects: Object.keys(activeSelects).length > 0 ? activeSelects : undefined,
   };
   const filtersKey = JSON.stringify(filters);
 
@@ -923,9 +930,19 @@ export default function App() {
               const genreField = schema.cote
                 ? schema.fields.find((f) => f.key === schema.cote!.genre_field)
                 : undefined;
+              // Tout champ `select` du schéma devient un filtre ; le champ
+              // genre de la cote a déjà le sien (colonne indexée dédiée).
+              const otherSelects = schema.fields.filter(
+                (f) => f.type === "select" && f.key !== genreField?.key,
+              );
               const hasSeries = schema.fields.some((f) => f.type === "series_ref");
-              if (!genreField && years.length === 0 && !hasSeries) return null;
-              const active = genreFilter || anneeFilter || serieFilter;
+              if (!genreField && otherSelects.length === 0 && years.length === 0 && !hasSeries)
+                return null;
+              const active =
+                genreFilter ||
+                anneeFilter ||
+                serieFilter ||
+                Object.values(selectFilters).some((v) => v !== "");
               return (
                 <div className="filter-bar">
                   {years.length > 0 && (
@@ -948,6 +965,22 @@ export default function App() {
                       ))}
                     </select>
                   )}
+                  {otherSelects.map((f) => (
+                    <select
+                      key={f.key}
+                      value={selectFilters[f.key] ?? ""}
+                      onChange={(e) =>
+                        setSelectFilters((prev) => ({ ...prev, [f.key]: e.target.value }))
+                      }
+                    >
+                      <option value="">{f.label} : tout</option>
+                      {(f.options ?? []).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.value}
+                        </option>
+                      ))}
+                    </select>
+                  ))}
                   {hasSeries && seriesList.length > 0 && (
                     <select value={serieFilter} onChange={(e) => setSerieFilter(e.target.value)}>
                       <option value="">Toutes les séries</option>
@@ -965,6 +998,7 @@ export default function App() {
                         setGenreFilter("");
                         setAnneeFilter("");
                         setSerieFilter("");
+                        setSelectFilters({});
                       }}
                     >
                       Réinitialiser

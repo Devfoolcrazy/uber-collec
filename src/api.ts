@@ -43,6 +43,8 @@ export interface SearchFilters {
   genre?: string;
   annee?: number;
   serie?: string;
+  /** Filtres sur les autres champs `select` du schéma : clé → valeur. */
+  selects?: Record<string, string>;
 }
 
 export type FieldValues = Record<string, unknown>;
