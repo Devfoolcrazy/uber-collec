@@ -158,15 +158,22 @@ async fn run_inner(app: &tauri::AppHandle, collection: &str) -> Result<(), Strin
             .as_ref()
             .map(|k| is_empty_value(item.fields.get(k)))
             .unwrap_or(false);
-        // Synopsis : comblé seulement pour les livres/BD avec clé Google
-        // Books (seule source de synopsis en masse).
-        let synopsis_missing = match (&synopsis_key, keys.gbooks.is_some()) {
-            (Some(k), true) if source == "bd" || source == "livres" => {
+        // Synopsis : comblé pour les livres/BD avec clé Google Books (seule
+        // source de synopsis en masse) et pour les DVD (TMDB le fournit).
+        let synopsis_missing = match &synopsis_key {
+            Some(k) if source == "dvd" => is_empty_value(item.fields.get(k)),
+            Some(k) if (source == "bd" || source == "livres") && keys.gbooks.is_some() => {
                 is_empty_value(item.fields.get(k))
             }
             _ => false,
         };
-        if !cover_missing && !genre_missing && !synopsis_missing {
+        // Nature de l'œuvre (Film / Série TV) : TMDB la fournit — comblée
+        // pour les DVD quand le schéma a un sélecteur type/nature.
+        let type_missing = source == "dvd"
+            && hydrate::find_target(&schema, &["type", "nature"])
+                .map(|f| is_empty_value(item.fields.get(&f.key)))
+                .unwrap_or(false);
+        if !cover_missing && !genre_missing && !synopsis_missing && !type_missing {
             let mut p = progress.lock().unwrap();
             p.processed += 1;
             p.skipped += 1;

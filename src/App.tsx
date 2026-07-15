@@ -106,8 +106,9 @@ export default function App() {
   async function startEnrich() {
     if (!current || !schema) return;
     const ok = await confirm(
-      `Compléter automatiquement les fiches de « ${schema.name} » depuis la BNF ?\n\n` +
-        `— Seules les fiches SANS couverture et AVEC un EAN sont traitées.\n` +
+      `Compléter automatiquement les fiches de « ${schema.name} » depuis les bases en ligne ?\n\n` +
+        `— Seules les fiches incomplètes (couverture, genre, synopsis, type…) sont traitées.\n` +
+        `— Rapprochement par EAN/ISBN (livres, BD), artiste + titre (CD) ou titre + année (DVD).\n` +
         `— Seuls les champs vides sont complétés, jamais d'écrasement.\n` +
         `— Rythme volontairement lent (~8 s par fiche) : comptez plusieurs heures.\n` +
         `— L'app doit rester ouverte et le Mac éveillé.\n\n` +
@@ -1014,7 +1015,7 @@ export default function App() {
               <div className="enrich-banner">
                 <div className="enrich-info">
                   <strong>
-                    Enrichissement BNF — {enrichProgress.processed}/{enrichProgress.total}
+                    Enrichissement — {enrichProgress.processed}/{enrichProgress.total}
                   </strong>
                   <span className="muted">
                     {enrichProgress.covers} couvertures · {enrichProgress.enriched} complétées

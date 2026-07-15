@@ -543,11 +543,40 @@ async fn tmdb_get(
         .map_err(|e| scrub_keys(&format!("TMDB : {e}")))
 }
 
+/// « Stargate SG-1 — Saison 3 » → ("Stargate SG-1", 3). TMDB ne connaît que
+/// le titre de la série : on cherche le titre nu, le dépliage des saisons
+/// régénère les candidats « — Saison N ». Ne découpe que si « saison » est
+/// suivi d'un numéro — « La Saison des femmes » reste intact.
+fn season_split(query: &str) -> Option<(&str, i64)> {
+    let bytes = query.as_bytes();
+    let pat = b"saison";
+    for i in (0..bytes.len().saturating_sub(pat.len())).rev() {
+        // « saison » est ASCII : une correspondance tombe sur des frontières
+        // de caractères valides, le découpage de tranche est sûr.
+        if !bytes[i..i + pat.len()].eq_ignore_ascii_case(pat) {
+            continue;
+        }
+        let Ok(numero) = query[i + pat.len()..].trim().parse::<i64>() else {
+            continue;
+        };
+        let titre = query[..i]
+            .trim_end_matches(|c: char| c.is_whitespace() || matches!(c, '—' | '–' | '-' | ':'))
+            .trim();
+        if titre.is_empty() {
+            return None;
+        }
+        return Some((titre, numero));
+    }
+    None
+}
+
 pub(crate) async fn tmdb(
     client: &reqwest::Client,
     key: &str,
     query: &str,
 ) -> Result<Vec<Candidate>, String> {
+    // Un coffret de saison se cherche par le titre de la série seule.
+    let query = season_split(query).map(|(titre, _)| titre).unwrap_or(query);
     // Recherche mixte : films ET séries TV (coffrets DVD de séries).
     let resp = tmdb_get(
         client,
@@ -660,7 +689,7 @@ pub(crate) async fn tmdb_strict(
     annee: Option<i64>,
 ) -> Result<Vec<Candidate>, String> {
     let candidates = tmdb(client, key, titre).await?;
-    Ok(candidates
+    let mut retained: Vec<Candidate> = candidates
         .into_iter()
         .filter(|c| {
             let titre_ok = c.titre.as_deref().is_some_and(|t| same_thing(t, titre));
@@ -674,7 +703,11 @@ pub(crate) async fn tmdb_strict(
             };
             titre_ok && annee_ok
         })
-        .collect())
+        .collect();
+    // Égalité exacte d'abord : « X — Saison 3 » doit préférer la saison 3
+    // à la fiche série « X », qui ne passe que par inclusion.
+    retained.sort_by_key(|c| c.titre.as_deref().map(norm) != Some(norm(titre)));
+    Ok(retained)
 }
 
 /// Minuscules, sans accents ni aucun séparateur : « Italo-Disco » ≡
@@ -1215,6 +1248,18 @@ mod tests {
     }
 
     #[test]
+    fn season_split_cases() {
+        assert_eq!(season_split("Stargate SG-1 — Saison 3"), Some(("Stargate SG-1", 3)));
+        assert_eq!(season_split("Kaamelott - saison 2"), Some(("Kaamelott", 2)));
+        assert_eq!(season_split("Le Bureau des légendes : Saison 5"), Some(("Le Bureau des légendes", 5)));
+        assert_eq!(season_split("kaamelott saison 1"), Some(("kaamelott", 1)));
+        // « saison » sans numéro : un titre de film, pas un coffret.
+        assert_eq!(season_split("La Saison des femmes"), None);
+        assert_eq!(season_split("Saison 3"), None);
+        assert_eq!(season_split("Die Hard"), None);
+    }
+
+    #[test]
     fn bnf_record_parsing() {
         let xml = r#"<srw:recordData><oai_dc:dc>
           <dc:identifier>http://catalogue.bnf.fr/ark:/12148/cb46657982q</dc:identifier>
@@ -1405,6 +1450,18 @@ mod tests {
         assert!(
             series.iter().any(|c| c.source.contains("série TV")),
             "Kaamelott doit remonter comme série TV"
+        );
+
+        // Une fiche de coffret « — Saison N » doit se rapprocher toute seule :
+        // recherche par le titre nu, puis saison exacte préférée à la série.
+        let saison = tmdb_strict(&client, &key, "Kaamelott — Saison 2", Some(2005))
+            .await
+            .unwrap();
+        println!("  strict saison → {:?}", saison.first().map(|c| (&c.titre, &c.source)));
+        assert_eq!(
+            saison.first().and_then(|c| c.titre.as_deref()),
+            Some("Kaamelott — Saison 2"),
+            "la saison 2 doit être le premier candidat strict"
         );
     }
 
