@@ -26,6 +26,14 @@ Desktop macOS (Tauri 2 + Rust + React) et consultation iOS.
   votre dépôt GitHub. L'app iOS (lecture seule) consomme un instantané du même
   dépôt.
 
+## Documentation
+
+- **[Guide de l'application](docs/GUIDE.md)** — schémas, cotes, séries,
+  recherche, imports/exports, synchronisation.
+- **[Les API externes](docs/APIS.md)** — inscription pas à pas à chaque
+  source (BNF, Google Books, Discogs, TMDB…), où mettre les clés,
+  limitations.
+
 ## Développement
 
 ```sh
