@@ -180,6 +180,12 @@ fields:
       - { value: Aventure, code: AVENT }
       - { value: Fantastique, code: FANT }
       - { value: Documentaire, code: DOCU }
+  - key: type
+    label: Type
+    type: select
+    options:
+      - { value: Film, code: FILM }
+      - { value: Série TV, code: SERIE }
   - key: support
     label: Support
     type: select

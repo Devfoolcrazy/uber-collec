@@ -36,6 +36,9 @@ pub struct Candidate {
     /// Acteurs principaux (TMDB).
     #[serde(default)]
     pub acteurs: Vec<String>,
+    /// Nature de l'œuvre quand la source la connaît (« Film », « Série TV »).
+    #[serde(default)]
+    pub media_type: Option<String>,
 }
 
 /// Catalogue des sources d'hydratation disponibles, présenté dans l'éditeur
@@ -299,6 +302,7 @@ async fn musicbrainz_query(
                 score: r["score"].as_i64(),
                 genre: None,
                 acteurs: Vec::new(),
+            media_type: None,
             })
         })
         .collect())
@@ -358,6 +362,7 @@ pub(crate) async fn itunes(
                 score: None,
                 genre: s(&r["primaryGenreName"]),
                 acteurs: Vec::new(),
+            media_type: None,
             })
         })
         .collect())
@@ -464,6 +469,7 @@ pub(crate) async fn discogs(
                     .or_else(|| r["genre"].as_array().and_then(|x| x.first()).and_then(s))
                     .map(|g| discogs_genre_fr(&g)),
                 acteurs: Vec::new(),
+            media_type: None,
             })
         })
         .collect())
@@ -604,6 +610,7 @@ pub(crate) async fn tmdb(
             score: entry["vote_count"].as_i64(),
             genre: genre.clone(),
             acteurs: acteurs.clone(),
+            media_type: Some(if is_tv { "Série TV" } else { "Film" }.to_string()),
         });
 
         // Une série TV = des coffrets par saison sur l'étagère : on déplie
@@ -636,6 +643,7 @@ pub(crate) async fn tmdb(
                     score: None,
                     genre: genre.clone(),
                     acteurs: acteurs.clone(),
+                    media_type: Some("Série TV".to_string()),
                 });
             }
         }
@@ -839,6 +847,7 @@ pub(crate) async fn bnf(
             score: None,
             genre: None,
             acteurs: Vec::new(),
+            media_type: None,
         });
     }
     Ok(out)
@@ -907,6 +916,7 @@ pub(crate) async fn google_books(
                 score: None,
             genre: None,
             acteurs: Vec::new(),
+            media_type: None,
             })
         })
         .collect())
@@ -954,6 +964,7 @@ async fn openlibrary(
             score: None,
             genre: None,
             acteurs: Vec::new(),
+            media_type: None,
         }]);
     }
 
@@ -996,6 +1007,7 @@ async fn openlibrary(
                 score: None,
             genre: None,
             acteurs: Vec::new(),
+            media_type: None,
             })
         })
         .collect())
@@ -1127,6 +1139,14 @@ pub fn candidate_to_fields(
     if let Some(genre) = &c.genre {
         if let Some(def) = find_target(schema, &["genre", "style"]) {
             if let Some(option) = def.options.iter().find(|o| same_thing(&o.value, genre)) {
+                out.insert(def.key.clone(), serde_json::json!(option.value));
+            }
+        }
+    }
+    // Nature de l'œuvre (Film / Série TV) : même règle que le genre.
+    if let Some(nature) = &c.media_type {
+        if let Some(def) = find_target(schema, &["type", "nature"]) {
+            if let Some(option) = def.options.iter().find(|o| same_thing(&o.value, nature)) {
                 out.insert(def.key.clone(), serde_json::json!(option.value));
             }
         }
@@ -1270,6 +1290,7 @@ mod tests {
             score: None,
             genre: None,
             acteurs: Vec::new(),
+            media_type: None,
         };
         let fields = candidate_to_fields(&schema, &c);
         // auteur_s ≡ auteurs : rempli, joint en texte car champ simple.
@@ -1300,6 +1321,7 @@ mod tests {
             score: None,
             genre: None,
             acteurs: Vec::new(),
+            media_type: None,
         };
         let fields = candidate_to_fields(&schema, &c);
         assert_eq!(fields["titre"], serde_json::json!("Lastman T1"));

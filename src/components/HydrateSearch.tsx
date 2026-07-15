@@ -6,6 +6,7 @@ const CANDIDATE_LABELS: [keyof Candidate, string][] = [
   ["auteurs", "Auteurs"],
   ["illustrateurs", "Dessinateurs"],
   ["acteurs", "Acteurs"],
+  ["media_type", "Type"],
   ["editeur", "Éditeur / label"],
   ["date_parution", "Date"],
   ["genre", "Genre"],

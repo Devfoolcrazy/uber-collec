@@ -121,6 +121,7 @@ export interface Candidate {
   synopsis: string | null;
   cover_url: string | null;
   score: number | null;
+  media_type: string | null;
 }
 
 /** Version de cache des couvertures : incrémentée au refresh manuel pour
