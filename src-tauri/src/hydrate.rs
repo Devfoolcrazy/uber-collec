@@ -586,10 +586,14 @@ pub(crate) async fn tmdb(
             .as_array()
             .map(|cast| cast.iter().take(4).filter_map(|m| s(&m["name"])).collect())
             .unwrap_or_default();
+        let genre = entry["genre_ids"]
+            .as_array()
+            .and_then(|ids| ids.iter().filter_map(|i| i.as_i64()).find_map(tmdb_genre))
+            .map(str::to_string);
         out.push(Candidate {
             source: if is_tv { "TMDB · série TV".into() } else { "TMDB".into() },
-            titre: Some(titre),
-            auteurs: realisateurs,
+            titre: Some(titre.clone()),
+            auteurs: realisateurs.clone(),
             illustrateurs: Vec::new(),
             editeur: None,
             date_parution: s(&entry["release_date"]).or_else(|| s(&entry["first_air_date"])),
@@ -598,12 +602,43 @@ pub(crate) async fn tmdb(
             cover_url: s(&entry["poster_path"])
                 .map(|p| format!("https://image.tmdb.org/t/p/w500{p}")),
             score: entry["vote_count"].as_i64(),
-            genre: entry["genre_ids"]
-                .as_array()
-                .and_then(|ids| ids.iter().filter_map(|i| i.as_i64()).find_map(tmdb_genre))
-                .map(str::to_string),
-            acteurs,
+            genre: genre.clone(),
+            acteurs: acteurs.clone(),
         });
+
+        // Une série TV = des coffrets par saison sur l'étagère : on déplie
+        // les saisons en candidats (jaquette, date et synopsis de chacune).
+        if is_tv {
+            let details = tmdb_get(
+                client,
+                key,
+                &format!("tv/{id}"),
+                &[("language", "fr-FR")],
+            )
+            .await
+            .unwrap_or(serde_json::Value::Null);
+            for season in details["seasons"].as_array().unwrap_or(&Vec::new()) {
+                let Some(number) = season["season_number"].as_i64().filter(|n| *n >= 1) else {
+                    continue; // saison 0 = épisodes spéciaux
+                };
+                out.push(Candidate {
+                    source: "TMDB · saison".into(),
+                    titre: Some(format!("{titre} — Saison {number}")),
+                    auteurs: realisateurs.clone(),
+                    illustrateurs: Vec::new(),
+                    editeur: None,
+                    date_parution: s(&season["air_date"]),
+                    ean: None,
+                    synopsis: s(&season["overview"]).or_else(|| s(&details["overview"])),
+                    cover_url: s(&season["poster_path"])
+                        .or_else(|| s(&details["poster_path"]))
+                        .map(|p| format!("https://image.tmdb.org/t/p/w500{p}")),
+                    score: None,
+                    genre: genre.clone(),
+                    acteurs: acteurs.clone(),
+                });
+            }
+        }
     }
     Ok(out)
 }
